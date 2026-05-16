@@ -8,8 +8,8 @@ on:
         required: false
         default: ""
   schedule:
-    # 08:00 KST
-    - cron: "0 23 * * *"
+    # 08:07 KST. Avoid minute 0 because GitHub can delay or drop busy top-of-hour schedules.
+    - cron: "7 23 * * *"
 
 permissions:
   contents: write
@@ -84,7 +84,8 @@ jobs:
           }
           $messagePath = Join-Path "runs" "podcast-message-$summaryDate.txt"
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-          [System.IO.File]::WriteAllText($messagePath, "🎧 음성요약 듣기`n$listenUrl", $utf8NoBom)
+          $label = [char]::ConvertFromUtf32(0x1F3A7) + " " + [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("7J2M7ISx7JqU7JW9IOuTo+q4sA=="))
+          [System.IO.File]::WriteAllText($messagePath, "$label`n$listenUrl", $utf8NoBom)
 
       - name: Archive summary to repository
         shell: powershell
