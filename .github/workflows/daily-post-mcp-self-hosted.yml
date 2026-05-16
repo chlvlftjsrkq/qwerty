@@ -18,16 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Verify local Python
+        shell: pwsh
+        run: py -3 --version
 
       - name: Install dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
+          py -3 -m pip install --upgrade pip
+          py -3 -m pip install -r requirements.txt
+          py -3 -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
 
       - name: Build Naver news summary
         shell: pwsh
@@ -39,11 +39,11 @@ jobs:
           POLICY_RSS_ENABLED: "false"
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
         run: |
-          $argsList = @("-m", "kakao_mma_news", "--dry-run")
+          $argsList = @("-3", "-m", "kakao_mma_news", "--dry-run")
           if ("${{ inputs.target_date }}" -ne "") {
             $argsList += @("--date", "${{ inputs.target_date }}")
           }
-          python @argsList
+          py @argsList
 
       - name: Post summary to KakaoTalk
         shell: pwsh
@@ -59,7 +59,7 @@ jobs:
           if ($null -eq $summary) {
             throw "No summary Markdown file found in runs/."
           }
-          python scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --verify
+          py -3 scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --verify
 
       - uses: actions/upload-artifact@v4
         if: always()
