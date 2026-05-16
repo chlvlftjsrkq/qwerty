@@ -61,6 +61,7 @@ jobs:
           TTS_VOICE: ${{ vars.TTS_VOICE || 'ko-KR-SunHiNeural' }}
           TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
           TTS_PITCH: ${{ vars.TTS_PITCH || '+0Hz' }}
+          TTS_TARGET_MINUTES: ${{ vars.TTS_TARGET_MINUTES || '5' }}
           PODCAST_BASE_URL: ${{ vars.PODCAST_BASE_URL || format('https://{0}.github.io/{1}/podcast/', github.repository_owner, github.event.repository.name) }}
           PODCAST_LISTEN_URL_TEMPLATE: ${{ vars.PODCAST_LISTEN_URL_TEMPLATE || '' }}
         run: |
@@ -71,7 +72,7 @@ jobs:
             throw "No summary Markdown file found in runs/."
           }
           $summaryDate = $summary.BaseName -replace "^summary-", ""
-          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date $summaryDate --summary "$($summary.FullName)" --site-base-url "$env:PODCAST_BASE_URL"
+          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date $summaryDate --summary "$($summary.FullName)" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES"
           if ([string]::IsNullOrWhiteSpace($env:PODCAST_LISTEN_URL_TEMPLATE)) {
             $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$summaryDate"
           } else {

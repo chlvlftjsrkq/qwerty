@@ -77,7 +77,8 @@ class CoreTests(unittest.TestCase):
             "2026-05-16",
         )
         self.assertIn("첫 번째 소식입니다. 병무청 공공데이터 기사.", speech)
-        self.assertIn("확인 포인트: 공식 안내 확인이 필요하다.", speech)
+        self.assertIn("주요 내용은 병무청이 공공데이터 행사를 열었다", speech)
+        self.assertNotIn("공식 안내 확인이 필요하다", speech)
         self.assertNotIn("Source:", speech)
         self.assertNotIn("️⃣", speech)
 

@@ -51,6 +51,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--voice", default=os.getenv("TTS_VOICE", "ko-KR-SunHiNeural"), help="edge-tts voice.")
     parser.add_argument("--rate", default=os.getenv("TTS_RATE", "+0%"), help="edge-tts rate, e.g. +0%.")
     parser.add_argument("--pitch", default=os.getenv("TTS_PITCH", "+0Hz"), help="edge-tts pitch, e.g. +0Hz.")
+    parser.add_argument(
+        "--target-minutes",
+        type=float,
+        default=float(os.getenv("TTS_TARGET_MINUTES", "5")),
+        help="Approximate maximum narration length. The script is compact and may be shorter when there are few articles.",
+    )
     return parser.parse_args()
 
 
@@ -69,44 +75,101 @@ def clean_for_speech(line: str) -> str:
     return normalize_space(line)
 
 
-def markdown_to_speech(summary: str, target_date: str) -> str:
-    lines: list[str] = []
-    title_seen = False
+def split_sentences(text: str) -> list[str]:
+    text = normalize_space(text)
+    if not text:
+        return []
+    sentences = re.split(r"(?<=[.!?。])\s+|(?<=[다요죠니다습니다])\.\s*", text)
+    return [normalize_space(sentence) for sentence in sentences if normalize_space(sentence)]
+
+
+def trim_text(text: str, limit: int) -> str:
+    text = normalize_space(text)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip(" .") + "..."
+
+
+def extract_articles(summary: str) -> list[dict[str, str]]:
+    articles: list[dict[str, str]] = []
+    current: dict[str, Any] | None = None
 
     for raw_line in summary.splitlines():
         line = raw_line.strip()
-        if not line or line == "---":
-            continue
-        if line.startswith("Source:"):
+        if not line or line == "---" or line.startswith("Source:"):
             continue
         if line.startswith("요약 모델 호출 실패:"):
             continue
 
         heading_match = re.match(r"^#\s*(🔟|[0-9]️⃣|[0-9]+)\s*(.+)$", line)
         if heading_match:
+            if current:
+                articles.append(
+                    {
+                        "number": current["number"],
+                        "title": current["title"],
+                        "body": " ".join(current["body"]),
+                    }
+                )
             raw_number = heading_match.group(1)
             digit = "10" if raw_number == "🔟" else re.sub(r"\D", "", raw_number) or "1"
             title = clean_for_speech(heading_match.group(2))
-            lines.append(f"{NUMBER_WORDS.get(digit, digit + '번째')} 소식입니다. {title}.")
+            current = {"number": digit, "title": title, "body": []}
             continue
 
+        if not current:
+            continue
+        if line.startswith("Opinion:") or line.startswith("오늘 한 줄 요약"):
+            continue
         if line.startswith("#"):
-            line = line.lstrip("#").strip()
-
-        if line.startswith("Opinion:"):
-            line = "확인 포인트:" + line[len("Opinion:") :]
+            continue
 
         cleaned = clean_for_speech(line)
-        if not cleaned:
-            continue
-        if cleaned.startswith(target_date) and "병무청 뉴스 브리핑" in cleaned:
-            title_seen = True
-        lines.append(cleaned)
+        if cleaned:
+            current["body"].append(cleaned)
 
+    if current:
+        articles.append(
+            {
+                "number": current["number"],
+                "title": current["title"],
+                "body": " ".join(current["body"]),
+            }
+        )
+    return articles
+
+
+def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[str]:
+    lines: list[str] = []
+    for article in articles:
+        number = article["number"]
+        title = trim_text(article["title"], 110)
+        sentences = split_sentences(article["body"])
+        body = " ".join(sentences[:2]) if sentences else article["body"]
+        body = trim_text(body, 260)
+        if not title or not body:
+            continue
+        candidate = f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. {title}. 주요 내용은 {body}"
+        projected = len("\n".join([*lines, candidate]))
+        if lines and projected > max_chars:
+            break
+        lines.append(candidate)
+    return lines
+
+
+def markdown_to_speech(summary: str, target_date: str, target_minutes: float = 5.0) -> str:
+    articles = extract_articles(summary)
+    max_chars = max(700, int(target_minutes * 900))
     intro = f"{target_date} 병무청 뉴스 음성 브리핑입니다."
-    if title_seen:
-        return "\n".join([intro, *lines])
-    return "\n".join([intro, *lines])
+    if not articles:
+        return "\n".join([intro, "네이버 뉴스 기준으로 공유할 만한 병무청 관련 주요 기사가 많지 않았습니다."])
+
+    opening = f"오늘은 주요 기사 {len(articles)}건을 제목과 핵심 내용 중심으로 짧게 전해드립니다."
+    lines = build_compact_lines(articles, max_chars=max_chars - len(intro) - len(opening) - 40)
+    if len(lines) < len(articles):
+        lines.append("나머지 기사는 중복이거나 관련성이 낮아 음성 요약에서는 줄였습니다.")
+    closing = "자세한 신청 조건과 일정은 원문 기사와 병무청 공식 안내를 함께 확인해 주세요."
+    return "\n".join([intro, opening, *lines, closing])
 
 
 async def synthesize_edge(text: str, output_path: Path, voice: str, rate: str, pitch: str) -> None:
@@ -169,7 +232,7 @@ async def build() -> int:
     script_dir.mkdir(parents=True, exist_ok=True)
 
     summary = summary_path.read_text(encoding="utf-8")
-    speech_text = markdown_to_speech(summary, args.date)
+    speech_text = markdown_to_speech(summary, args.date, args.target_minutes)
     script_path = script_dir / f"{args.date}.txt"
     script_path.write_text(speech_text, encoding="utf-8")
 

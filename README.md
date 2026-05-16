@@ -59,10 +59,10 @@ PC 카카오톡이 로그인되어 있고, 잠금 화면이 아니며, 단톡방
 요약 Markdown을 음성 브리핑 MP3로 변환하려면:
 
 ```powershell
-.\.venv\Scripts\python scripts\build_podcast_audio.py --date 2026-05-16 --summary runs\summary-2026-05-16.md --site-base-url "https://YOUR_GITHUB_USER.github.io/YOUR_REPO/podcast/"
+.\.venv\Scripts\python scripts\build_podcast_audio.py --date 2026-05-16 --summary runs\summary-2026-05-16.md --site-base-url "https://YOUR_GITHUB_USER.github.io/YOUR_REPO/podcast/" --target-minutes 5
 ```
 
-생성 결과는 `podcast/audio/YYYY-MM-DD.mp3`, `podcast/scripts/YYYY-MM-DD.txt`, `podcast/manifest.json`에 저장됩니다. `podcast/index.html`은 GitHub Pages에서 `manifest.json`을 읽어 최신 음성 요약을 재생합니다.
+생성 결과는 `podcast/audio/YYYY-MM-DD.mp3`, `podcast/scripts/YYYY-MM-DD.txt`, `podcast/manifest.json`에 저장됩니다. 음성 스크립트는 인사말 뒤 기사 제목과 주요 내용 1~2문장만 읽도록 압축하며, 기본 목표 길이는 5분 상한입니다. `podcast/index.html`은 GitHub Pages에서 `manifest.json`을 읽어 최신 음성 요약을 재생합니다.
 
 ## 매일 자동 실행
 
@@ -89,6 +89,7 @@ GitHub 저장소 설정에서 아래 값을 준비하세요.
 - Repository variable `PODCAST_BASE_URL`: 선택, 기본값은 `https://<owner>.github.io/<repo>/podcast/`
 - Repository variable `PODCAST_LISTEN_URL_TEMPLATE`: 선택, private repo처럼 Pages를 못 쓰면 `https://github.com/<owner>/<repo>/blob/main/podcast/audio/{date}.mp3`
 - Repository variable `TTS_VOICE`: 선택, 기본값은 `ko-KR-SunHiNeural`
+- Repository variable `TTS_TARGET_MINUTES`: 선택, 기본값은 `5`
 - Repository variable `KSKILL_PROXY_BASE_URL`: 선택, 기본값은 `https://k-skill-proxy.nomadamas.org`
 - Secret `OPENAI_API_KEY`: 선택, `SUMMARY_PROVIDER=auto` 또는 `openai`일 때 사용합니다.
 
