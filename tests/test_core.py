@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms, strip_html
 from kakao_mma_news.summarize import _load_json_object, _render_codex_summary, summarize_heuristic
+from scripts.build_podcast_audio import markdown_to_speech
 
 
 class CoreTests(unittest.TestCase):
@@ -66,6 +67,19 @@ class CoreTests(unittest.TestCase):
         self.assertIn("# 1️⃣ 전북지방병무청 경진대회", summary)
         self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
         self.assertIn("Source: example.com / https://example.com/news", summary)
+
+    def test_podcast_speech_cleans_markdown(self):
+        speech = markdown_to_speech(
+            "# 1️⃣ 병무청 공공데이터 기사\n"
+            "병무청이 공공데이터 행사를 열었다. 🎯\n"
+            "Opinion: 공식 안내 확인이 필요하다.\n"
+            "Source: example.com / https://example.com/news\n",
+            "2026-05-16",
+        )
+        self.assertIn("첫 번째 소식입니다. 병무청 공공데이터 기사.", speech)
+        self.assertIn("확인 포인트: 공식 안내 확인이 필요하다.", speech)
+        self.assertNotIn("Source:", speech)
+        self.assertNotIn("️⃣", speech)
 
 
 if __name__ == "__main__":

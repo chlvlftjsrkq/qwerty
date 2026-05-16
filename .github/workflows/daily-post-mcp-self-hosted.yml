@@ -54,6 +54,27 @@ jobs:
           }
           & $env:PYTHON_EXE @argsList
 
+      - name: Build podcast audio
+        shell: powershell
+        env:
+          TTS_PROVIDER: ${{ vars.TTS_PROVIDER || 'edge' }}
+          TTS_VOICE: ${{ vars.TTS_VOICE || 'ko-KR-SunHiNeural' }}
+          TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
+          TTS_PITCH: ${{ vars.TTS_PITCH || '+0Hz' }}
+          PODCAST_BASE_URL: ${{ vars.PODCAST_BASE_URL || format('https://{0}.github.io/{1}/podcast/', github.repository_owner, github.event.repository.name) }}
+        run: |
+          $summary = Get-ChildItem -Path runs -Filter "summary-*.md" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if ($null -eq $summary) {
+            throw "No summary Markdown file found in runs/."
+          }
+          $summaryDate = $summary.BaseName -replace "^summary-", ""
+          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date $summaryDate --summary "$($summary.FullName)" --site-base-url "$env:PODCAST_BASE_URL"
+          $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$summaryDate"
+          $messagePath = Join-Path "runs" "podcast-message-$summaryDate.txt"
+          "🎧 음성요약 듣기`n$listenUrl" | Set-Content -Encoding UTF8 -Path $messagePath
+
       - name: Archive summary to repository
         shell: powershell
         run: |
@@ -66,16 +87,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path summaries | Out-Null
           $archivePath = Join-Path "summaries" $summary.Name
           Copy-Item -LiteralPath $summary.FullName -Destination $archivePath -Force
+          $summaryDate = $summary.BaseName -replace "^summary-", ""
+          $podcastAudio = Join-Path "podcast\audio" "$summaryDate.mp3"
+          $podcastScript = Join-Path "podcast\scripts" "$summaryDate.txt"
+          $podcastManifest = "podcast\manifest.json"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- $archivePath
+          git add -- $archivePath $podcastAudio $podcastScript $podcastManifest
 
-          $changes = git status --porcelain -- $archivePath
+          $changes = git status --porcelain -- $archivePath $podcastAudio $podcastScript $podcastManifest
           if ([string]::IsNullOrWhiteSpace($changes)) {
-            Write-Host "No summary changes to archive."
+            Write-Host "No summary or podcast changes to archive."
           } else {
-            $summaryDate = $summary.BaseName -replace "^summary-", ""
             git commit -m "Archive MMA news summary $summaryDate"
             $branch = if ([string]::IsNullOrWhiteSpace($env:GITHUB_REF_NAME)) { "main" } else { $env:GITHUB_REF_NAME }
             git fetch origin $branch
@@ -102,6 +126,26 @@ jobs:
             throw "kakaotalk-mcp executable was not found: $mcpCommand"
           }
           & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --mcp-command "$mcpCommand" --verify
+
+      - name: Post podcast link to KakaoTalk
+        shell: powershell
+        env:
+          TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
+            throw "Repository variable TARGET_CHATROOM is required."
+          }
+          $message = Get-ChildItem -Path runs -Filter "podcast-message-*.txt" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if ($null -eq $message) {
+            throw "No podcast message file found in runs/."
+          }
+          $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
+          if (!(Test-Path $mcpCommand)) {
+            throw "kakaotalk-mcp executable was not found: $mcpCommand"
+          }
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($message.FullName)" --mcp-command "$mcpCommand" --verify
 
       - uses: actions/upload-artifact@v4
         if: always()

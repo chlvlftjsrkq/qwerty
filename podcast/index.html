@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>병무청 뉴스 음성 브리핑</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101418;
+      --panel: #161c22;
+      --line: #28323c;
+      --text: #f4f7fb;
+      --muted: #aab6c2;
+      --accent: #43d17a;
+      --accent-2: #61a8ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, "Noto Sans KR", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      padding: 16px 20px;
+      text-align: center;
+      background: #0b0f13;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(20px, 4vw, 30px);
+      letter-spacing: 0;
+    }
+
+    main {
+      display: grid;
+      place-items: center;
+      padding: 28px 18px;
+    }
+
+    .player {
+      width: min(560px, 100%);
+      display: grid;
+      gap: 22px;
+      justify-items: center;
+      text-align: center;
+    }
+
+    .disc {
+      width: min(240px, 62vw);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      border: 8px solid var(--accent);
+      background:
+        radial-gradient(circle at center, #0f1419 0 11%, #f8fbff 12% 15%, transparent 16%),
+        conic-gradient(from 20deg, #1e2b35, #4b6f85, #1b242c, #2d4858, #1e2b35);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+
+    .disc.playing {
+      animation: spin 5s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .title {
+      display: grid;
+      gap: 8px;
+    }
+
+    .title h2 {
+      margin: 0;
+      font-size: clamp(21px, 5vw, 34px);
+      letter-spacing: 0;
+    }
+
+    .title p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    button, a.download {
+      min-width: 44px;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 18px;
+    }
+
+    #play {
+      width: 64px;
+      height: 64px;
+      border: 0;
+      background: var(--accent);
+      color: #06130a;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    a.download {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 18px;
+      text-decoration: none;
+      color: var(--accent);
+    }
+
+    footer {
+      display: grid;
+      grid-template-columns: 52px 1fr 52px;
+      gap: 14px;
+      align-items: center;
+      padding: 16px 18px;
+      border-top: 1px solid var(--line);
+      background: #0b0f13;
+      color: var(--muted);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .status {
+      min-height: 24px;
+      color: var(--accent-2);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>병무청 뉴스 음성 브리핑</h1>
+    </header>
+
+    <main>
+      <section class="player" aria-label="음성 브리핑 플레이어">
+        <div id="disc" class="disc" aria-hidden="true"></div>
+        <div class="title">
+          <h2 id="episodeTitle">불러오는 중</h2>
+          <p id="episodeDescription">네이버 뉴스 기준 병무청 관련 음성 요약</p>
+        </div>
+        <div class="controls">
+          <button id="prev" type="button" aria-label="이전 에피소드">◀◀</button>
+          <button id="play" type="button" aria-label="재생">▶</button>
+          <button id="next" type="button" aria-label="다음 에피소드">▶▶</button>
+        </div>
+        <a id="download" class="download" href="#" download>음원 다운로드</a>
+        <div id="status" class="status"></div>
+      </section>
+    </main>
+
+    <footer>
+      <span id="current">00:00</span>
+      <input id="progress" type="range" min="0" max="1000" value="0" aria-label="재생 위치">
+      <span id="duration">00:00</span>
+    </footer>
+  </div>
+
+  <script>
+    const audio = new Audio();
+    const state = { episodes: [], index: 0, playing: false };
+
+    const disc = document.getElementById("disc");
+    const title = document.getElementById("episodeTitle");
+    const description = document.getElementById("episodeDescription");
+    const status = document.getElementById("status");
+    const play = document.getElementById("play");
+    const prev = document.getElementById("prev");
+    const next = document.getElementById("next");
+    const progress = document.getElementById("progress");
+    const current = document.getElementById("current");
+    const duration = document.getElementById("duration");
+    const download = document.getElementById("download");
+
+    function formatTime(seconds) {
+      if (!Number.isFinite(seconds)) return "00:00";
+      const minute = Math.floor(seconds / 60);
+      const second = Math.floor(seconds % 60);
+      return `${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+    }
+
+    function episodeFromQuery() {
+      return new URLSearchParams(location.search).get("date");
+    }
+
+    function setEpisode(index) {
+      if (!state.episodes.length) {
+        title.textContent = "데이터 없음";
+        status.textContent = "아직 등록된 음성 브리핑이 없습니다.";
+        return;
+      }
+      state.index = Math.max(0, Math.min(index, state.episodes.length - 1));
+      const episode = state.episodes[state.index];
+      title.textContent = episode.title || `${episode.date} 병무청 뉴스 브리핑`;
+      description.textContent = episode.description || "네이버 뉴스 기준 병무청 관련 음성 요약";
+      audio.pause();
+      audio.src = episode.audio;
+      audio.load();
+      download.href = episode.audio;
+      download.download = `${episode.date}.mp3`;
+      progress.value = 0;
+      current.textContent = "00:00";
+      duration.textContent = "00:00";
+      play.textContent = "▶";
+      disc.classList.remove("playing");
+      state.playing = false;
+      status.textContent = "";
+      history.replaceState(null, "", `?date=${episode.date}`);
+    }
+
+    async function loadManifest() {
+      try {
+        const response = await fetch("manifest.json", { cache: "no-store" });
+        if (!response.ok) throw new Error(`manifest ${response.status}`);
+        const data = await response.json();
+        state.episodes = Array.isArray(data.episodes) ? data.episodes : [];
+        const requested = episodeFromQuery();
+        const index = Math.max(0, state.episodes.findIndex((item) => item.date === requested));
+        setEpisode(index);
+      } catch (error) {
+        title.textContent = "데이터 없음";
+        status.textContent = "manifest.json을 불러오지 못했습니다.";
+      }
+    }
+
+    play.addEventListener("click", async () => {
+      if (!audio.src) return;
+      if (state.playing) {
+        audio.pause();
+      } else {
+        await audio.play();
+      }
+    });
+
+    prev.addEventListener("click", () => setEpisode(state.index + 1));
+    next.addEventListener("click", () => setEpisode(state.index - 1));
+
+    audio.addEventListener("play", () => {
+      state.playing = true;
+      play.textContent = "Ⅱ";
+      disc.classList.add("playing");
+    });
+
+    audio.addEventListener("pause", () => {
+      state.playing = false;
+      play.textContent = "▶";
+      disc.classList.remove("playing");
+    });
+
+    audio.addEventListener("loadedmetadata", () => {
+      duration.textContent = formatTime(audio.duration);
+    });
+
+    audio.addEventListener("timeupdate", () => {
+      current.textContent = formatTime(audio.currentTime);
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        progress.value = String(Math.floor((audio.currentTime / audio.duration) * 1000));
+      }
+    });
+
+    audio.addEventListener("error", () => {
+      status.textContent = "음성 파일을 불러오지 못했습니다.";
+      disc.classList.remove("playing");
+    });
+
+    progress.addEventListener("input", () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        audio.currentTime = (Number(progress.value) / 1000) * audio.duration;
+      }
+    });
+
+    loadManifest();
+  </script>
+</body>
+</html>

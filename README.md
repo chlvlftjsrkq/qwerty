@@ -8,6 +8,7 @@
 - 요약: self-hosted 실행에서는 로그인된 Codex CLI를 LLM으로 사용, GitHub-hosted 요약 전용 workflow는 `OPENAI_API_KEY`가 있으면 OpenAI API를 쓰고 없으면 제목/요약 기반 간단 요약
 - 게시: Windows PC 카카오톡 GUI를 `pyautogui`로 제어
 - GitHub Actions: 수집/요약은 가능하지만, 단톡방 게시는 카카오톡이 로그인된 Windows PC 또는 self-hosted runner에서만 가능
+- 음성 요약: `edge-tts`로 MP3를 만들고 `podcast/` 정적 플레이어에서 재생
 
 ## 설치
 
@@ -53,6 +54,16 @@ PC 카카오톡이 로그인되어 있고, 잠금 화면이 아니며, 단톡방
 
 기본 동작은 카카오톡 창 포커스, `Ctrl+F`, 단톡방 이름 붙여넣기, Enter, 메시지 붙여넣기, Enter입니다. 환경에 따라 검색 단축키가 다르면 `.env`의 `KAKAO_SEARCH_HOTKEY`를 수정하거나 `KAKAO_SEARCH_CLICK_X/Y`, `KAKAO_MESSAGE_CLICK_X/Y` 좌표를 지정하세요.
 
+## 음성 요약 플레이어
+
+요약 Markdown을 음성 브리핑 MP3로 변환하려면:
+
+```powershell
+.\.venv\Scripts\python scripts\build_podcast_audio.py --date 2026-05-16 --summary runs\summary-2026-05-16.md --site-base-url "https://YOUR_GITHUB_USER.github.io/YOUR_REPO/podcast/"
+```
+
+생성 결과는 `podcast/audio/YYYY-MM-DD.mp3`, `podcast/scripts/YYYY-MM-DD.txt`, `podcast/manifest.json`에 저장됩니다. `podcast/index.html`은 GitHub Pages에서 `manifest.json`을 읽어 최신 음성 요약을 재생합니다.
+
 ## 매일 자동 실행
 
 Windows 작업 스케줄러에 등록:
@@ -75,12 +86,15 @@ GitHub 저장소 설정에서 아래 값을 준비하세요.
 - Repository variable `SUMMARY_PROVIDER`: 선택, self-hosted 게시 workflow 기본값은 `codex`
 - Repository variable `CODEX_COMMAND`: 선택, 기본값은 `C:\Users\April\AppData\Roaming\npm\codex.cmd`
 - Repository variable `CODEX_TIMEOUT_SECONDS`: 선택, 기본값은 `300`
+- Repository variable `PODCAST_BASE_URL`: 선택, 기본값은 `https://<owner>.github.io/<repo>/podcast/`
+- Repository variable `TTS_VOICE`: 선택, 기본값은 `ko-KR-SunHiNeural`
 - Repository variable `KSKILL_PROXY_BASE_URL`: 선택, 기본값은 `https://k-skill-proxy.nomadamas.org`
 - Secret `OPENAI_API_KEY`: 선택, `SUMMARY_PROVIDER=auto` 또는 `openai`일 때 사용합니다.
 
 요약 영구 보관:
 
 - Actions가 만든 `runs/summary-YYYY-MM-DD.md`는 실행 artifact로도 올라가고, 동시에 `summaries/summary-YYYY-MM-DD.md`로 복사되어 GitHub repo에 자동 커밋됩니다.
+- 음성 요약은 `podcast/audio/YYYY-MM-DD.mp3`와 `podcast/scripts/YYYY-MM-DD.txt`로 저장되고, `podcast/manifest.json`이 함께 자동 커밋됩니다.
 - `runs/` artifact는 실행 기록용 임시 보관이고, `summaries/` 폴더가 장기 보관용 원본입니다.
 - 같은 날짜 요약이 이미 있고 내용이 같으면 새 커밋을 만들지 않습니다.
 

@@ -77,7 +77,7 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
         "target_date": target_date.isoformat(),
         "format": (
             "🪖 YYYY-MM-DD 병무청 뉴스 브리핑\n"
-            "전날 네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. "
+            "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. "
             "개별 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.\n\n"
             "---\n\n"
             "오늘의 병무청 뉴스 톡 📡\n"
@@ -170,7 +170,7 @@ def _render_codex_summary(
 ) -> str:
     lines = [
         f"🪖 {target_date.isoformat()} 병무청 뉴스 브리핑",
-        "전날 네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. 개별 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
+        "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. 개별 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
         "",
         "---",
         "",
@@ -381,7 +381,7 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
     if not articles:
         return (
             f"{header}\n"
-            "전날 네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식이 많지 않았어요. "
+            "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식이 많지 않았어요. "
             "급한 신청·접수 일정은 병무청 공식 안내를 한 번 더 확인해 주세요.\n\n"
             "---\n\n"
             "오늘의 병무청 뉴스 톡 📡\n"
@@ -396,7 +396,7 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
     top = articles[:8]
     lines = [
         header,
-        f"전날 네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식 {len(articles)}건을 정리했어요. 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
+        f"네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식 {len(articles)}건을 정리했어요. 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
         "",
         "---",
         "",
