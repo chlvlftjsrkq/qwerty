@@ -11,6 +11,9 @@ on:
     # 08:00 KST
     - cron: "0 23 * * *"
 
+permissions:
+  contents: write
+
 jobs:
   post:
     runs-on: [self-hosted, Windows, X64, kakao, qwerty]
@@ -46,6 +49,35 @@ jobs:
             $argsList += @("--date", "${{ inputs.target_date }}")
           }
           & $env:PYTHON_EXE @argsList
+
+      - name: Archive summary to repository
+        shell: powershell
+        run: |
+          $summary = Get-ChildItem -Path runs -Filter "summary-*.md" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if ($null -eq $summary) {
+            throw "No summary Markdown file found in runs/."
+          }
+          New-Item -ItemType Directory -Force -Path summaries | Out-Null
+          $archivePath = Join-Path "summaries" $summary.Name
+          Copy-Item -LiteralPath $summary.FullName -Destination $archivePath -Force
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- $archivePath
+
+          $changes = git status --porcelain -- $archivePath
+          if ([string]::IsNullOrWhiteSpace($changes)) {
+            Write-Host "No summary changes to archive."
+          } else {
+            $summaryDate = $summary.BaseName -replace "^summary-", ""
+            git commit -m "Archive MMA news summary $summaryDate"
+            $branch = if ([string]::IsNullOrWhiteSpace($env:GITHUB_REF_NAME)) { "main" } else { $env:GITHUB_REF_NAME }
+            git fetch origin $branch
+            git rebase "origin/$branch"
+            git push origin "HEAD:$branch"
+          }
 
       - name: Post summary to KakaoTalk
         shell: powershell

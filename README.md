@@ -67,6 +67,12 @@ GitHub 저장소 설정에서 아래 값을 준비하세요.
 - Repository variable `KSKILL_PROXY_BASE_URL`: 선택, 기본값은 `https://k-skill-proxy.nomadamas.org`
 - Secret `OPENAI_API_KEY`: 선택, 있으면 더 자연스러운 요약을 생성합니다.
 
+요약 영구 보관:
+
+- Actions가 만든 `runs/summary-YYYY-MM-DD.md`는 실행 artifact로도 올라가고, 동시에 `summaries/summary-YYYY-MM-DD.md`로 복사되어 GitHub repo에 자동 커밋됩니다.
+- `runs/` artifact는 실행 기록용 임시 보관이고, `summaries/` 폴더가 장기 보관용 원본입니다.
+- 같은 날짜 요약이 이미 있고 내용이 같으면 새 커밋을 만들지 않습니다.
+
 주의: self-hosted runner가 Windows 서비스로 실행되면 GUI 카카오톡 창을 제어하지 못할 수 있습니다. 카카오톡이 열린 사용자 세션에서 runner를 실행해야 합니다.
 
 ## 뉴스 수집 설정
