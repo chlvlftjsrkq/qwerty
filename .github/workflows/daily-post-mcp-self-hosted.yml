@@ -15,19 +15,21 @@ jobs:
   post:
     runs-on: [self-hosted, Windows, X64, kakao, qwerty]
     timeout-minutes: 20
+    env:
+      PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Verify local Python
         shell: powershell
-        run: py -3 --version
+        run: '& $env:PYTHON_EXE --version'
 
       - name: Install dependencies
         shell: powershell
         run: |
-          py -3 -m pip install --upgrade pip
-          py -3 -m pip install -r requirements.txt
-          py -3 -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
+          & $env:PYTHON_EXE -m pip install --upgrade pip
+          & $env:PYTHON_EXE -m pip install -r requirements.txt
+          & $env:PYTHON_EXE -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
 
       - name: Build Naver news summary
         shell: powershell
@@ -39,11 +41,11 @@ jobs:
           POLICY_RSS_ENABLED: "false"
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
         run: |
-          $argsList = @("-3", "-m", "kakao_mma_news", "--dry-run")
+          $argsList = @("-m", "kakao_mma_news", "--dry-run")
           if ("${{ inputs.target_date }}" -ne "") {
             $argsList += @("--date", "${{ inputs.target_date }}")
           }
-          py @argsList
+          & $env:PYTHON_EXE @argsList
 
       - name: Post summary to KakaoTalk
         shell: powershell
@@ -59,7 +61,7 @@ jobs:
           if ($null -eq $summary) {
             throw "No summary Markdown file found in runs/."
           }
-          py -3 scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --verify
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --verify
 
       - uses: actions/upload-artifact@v4
         if: always()
