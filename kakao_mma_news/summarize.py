@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from datetime import date
@@ -10,6 +11,7 @@ from typing import Any
 
 from .config import Config
 from .news import Article, normalize_space
+from .weather import build_weather_summary
 
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
@@ -47,7 +49,7 @@ def codex_article_payload(articles: list[Article], limit: int = 12) -> list[dict
         payload.append(
             {
                 "no": str(idx),
-                "title": article.title[:180],
+                "title": article.title,
                 "source": article.source[:80],
                 "published_at": published,
                 "summary": article.summary[:600],
@@ -82,11 +84,11 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
             "---\n\n"
             "오늘의 병무청 뉴스 톡 📡\n"
             "# 1️⃣ 기사 제목\n"
-            "기사 요약 2~3문장. 🎯\n"
+            "기사 요약 1~2문장. 줄임표 없이 경어체로 끝맺음.\n"
             "Opinion: 병무행정 관점의 의미나 확인 포인트 1~2문장.\n"
             "Source: 매체 / 링크\n\n"
             "# 2️⃣ 기사 제목\n"
-            "...\n\n"
+            "기사 요약 1~2문장.\n\n"
             "---\n\n"
             "오늘 한 줄 요약 🎯\n"
             "전체 흐름을 한 문장으로 요약.\n\n"
@@ -136,9 +138,30 @@ def _clean_text(value: object, limit: int = 0) -> str:
     if value is None:
         return ""
     text = normalize_space(str(value))
+    text = _remove_ellipsis(text)
     if limit and len(text) > limit:
-        return text[: limit - 3].rstrip() + "..."
+        return text[:limit].rstrip(" .,")
     return text
+
+
+def _remove_ellipsis(value: str) -> str:
+    return normalize_space(re.sub(r"(\.{2,}|…+)", " ", value))
+
+
+def _prepend_weather_summary(summary: str, weather_summary: str) -> str:
+    weather_summary = _clean_text(weather_summary)
+    if not weather_summary:
+        return summary
+    lines = summary.splitlines()
+    if any(line.startswith("🌤️") for line in lines[:5]):
+        return summary
+    if not lines:
+        return weather_summary
+    return "\n".join([lines[0], weather_summary, "", *lines[1:]])
+
+
+def _with_weather(config: Config, summary: str) -> str:
+    return _prepend_weather_summary(summary, build_weather_summary(config))
 
 
 def _load_json_object(raw_text: str) -> dict[str, Any]:
@@ -166,16 +189,20 @@ def _load_json_object(raw_text: str) -> dict[str, Any]:
 
 
 def _render_codex_summary(
-    target_date: date, data: dict[str, Any], articles: list[Article]
+    target_date: date, data: dict[str, Any], articles: list[Article], weather_summary: str = ""
 ) -> str:
     lines = [
         f"🪖 {target_date.isoformat()} 병무청 뉴스 브리핑",
-        "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. 개별 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
+    ]
+    if weather_summary:
+        lines.extend([weather_summary, ""])
+    lines.extend([
+        "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했습니다. 개별 신청과 접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
         "",
         "---",
         "",
         "오늘의 병무청 뉴스 톡 📡",
-    ]
+    ])
 
     rendered_items = 0
     raw_items = data.get("items", [])
@@ -183,8 +210,8 @@ def _render_codex_summary(
         for item in raw_items[:8]:
             if not isinstance(item, dict):
                 continue
-            title = _clean_text(item.get("title"), 120)
-            summary = _clean_text(item.get("summary"), 450)
+            title = _clean_text(item.get("title"))
+            summary = _clean_text(item.get("summary"), 360)
             opinion = _clean_text(item.get("opinion"), 260)
             source = _clean_text(item.get("source"), 80) or "네이버 뉴스"
             url = _clean_text(item.get("url"), 500)
@@ -208,7 +235,7 @@ def _render_codex_summary(
             lines.extend(
                 [
                     f"# {number} {title}",
-                    f"{summary} 🎯",
+                    summary,
                     f"Opinion: {opinion or fallback_opinion}",
                     f"Source: {source}{' / ' + url if url else ''}",
                     "",
@@ -267,12 +294,17 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Your entire final answer must be exactly one valid JSON object.",
             "Do not acknowledge, do not explain, do not write Markdown, and do not wrap it in a code block.",
             "Write all JSON string values in concise Korean.",
+            "Use polite conversational Korean. End every sentence clearly with forms such as 합니다, 했습니다, 입니다, 주세요, or 됩니다.",
+            "Never use ellipses, Unicode ellipsis, repeated trailing dots, or title-shortening marks.",
+            "Do not mention input, JSON, article summary, provided text, or source data.",
             f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
             "Exclude or briefly down-rank articles that are weakly related to 병무청.",
             "For opinion, write only a cautious 병무행정 관점의 확인 포인트.",
-            'Required JSON schema: {"items":[{"title":"기사 제목","summary":"기사 요약 2~3문장","opinion":"병무행정 관점의 확인 포인트 1~2문장","source":"매체명","url":"원문 URL"}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}',
+            "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
+            "For each item summary, write one or two short polite spoken Korean sentences.",
+            'Required JSON schema: {"items":[{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"병무행정 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}',
             "items는 최대 8개만 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]
     )
@@ -344,10 +376,10 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
 
 
 def _trim_sentence(value: str, limit: int = 180) -> str:
-    text = normalize_space(value)
+    text = _remove_ellipsis(normalize_space(value))
     if len(text) <= limit:
         return text
-    return text[: limit - 3].rstrip() + "..."
+    return text[:limit].rstrip(" .,")
 
 
 def _article_opinion(article: Article) -> str:
@@ -379,8 +411,9 @@ def _one_line_summary(articles: list[Article]) -> str:
 def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
     header = f"🪖 {target_date.isoformat()} 병무청 뉴스 브리핑"
     if not articles:
-        return (
-            f"{header}\n"
+        lines = [header]
+        lines.extend(
+            [
             "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식이 많지 않았어요. "
             "급한 신청·접수 일정은 병무청 공식 안내를 한 번 더 확인해 주세요.\n\n"
             "---\n\n"
@@ -391,7 +424,9 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
             "오늘은 공유할 만한 병무청 직접 관련 뉴스가 확인되지 않았습니다.\n\n"
             "---\n\n"
             "💡 필요하면 검색어를 넓히거나 Google News·정책브리핑 RSS 보조 출처를 켜서 다시 확인할 수 있어요."
+            ]
         )
+        return "\n".join(lines)
 
     top = articles[:8]
     lines = [
@@ -439,20 +474,20 @@ def build_summary(config: Config, target_date: date, articles: list[Article]) ->
     provider = config.summary_provider
     if provider == "codex":
         try:
-            return summarize_with_codex(config, target_date, articles)
+            return _with_weather(config, summarize_with_codex(config, target_date, articles))
         except Exception as exc:
             fallback = summarize_heuristic(target_date, articles)
-            return f"{fallback}\n\n요약 모델 호출 실패: {exc}"
+            return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
     if provider == "openai":
-        return summarize_with_openai(config, target_date, articles)
+        return _with_weather(config, summarize_with_openai(config, target_date, articles))
     if provider in {"heuristic", "none", "fallback"}:
-        return summarize_heuristic(target_date, articles)
+        return _with_weather(config, summarize_heuristic(target_date, articles))
     if provider not in {"auto", ""}:
         raise RuntimeError(f"지원하지 않는 SUMMARY_PROVIDER입니다: {provider}")
     if config.openai_api_key:
         try:
-            return summarize_with_openai(config, target_date, articles)
+            return _with_weather(config, summarize_with_openai(config, target_date, articles))
         except Exception as exc:
             fallback = summarize_heuristic(target_date, articles)
-            return f"{fallback}\n\n요약 모델 호출 실패: {exc}"
-    return summarize_heuristic(target_date, articles)
+            return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
+    return _with_weather(config, summarize_heuristic(target_date, articles))

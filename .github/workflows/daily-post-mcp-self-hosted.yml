@@ -43,6 +43,10 @@ jobs:
           CODEX_TIMEOUT_SECONDS: ${{ vars.CODEX_TIMEOUT_SECONDS || '300' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
+          WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
+          WEATHER_LOCATION: ${{ vars.WEATHER_LOCATION || '서울' }}
+          WEATHER_LATITUDE: ${{ vars.WEATHER_LATITUDE || '37.5665' }}
+          WEATHER_LONGITUDE: ${{ vars.WEATHER_LONGITUDE || '126.9780' }}
           NAVER_NEWS_ENABLED: "true"
           GOOGLE_NEWS_ENABLED: "false"
           POLICY_RSS_ENABLED: "false"

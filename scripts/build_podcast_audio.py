@@ -64,8 +64,13 @@ def normalize_space(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def remove_ellipsis(value: str) -> str:
+    return normalize_space(re.sub(r"(\.{2,}|…+)", " ", value))
+
+
 def clean_for_speech(line: str) -> str:
     line = re.sub(r"https?://\S+", "", line)
+    line = remove_ellipsis(line)
     line = line.replace("🎯", "")
     line = EMOJI_PATTERN.sub("", line)
     line = line.replace("·", ", ")
@@ -79,15 +84,43 @@ def split_sentences(text: str) -> list[str]:
     text = normalize_space(text)
     if not text:
         return []
-    sentences = re.split(r"(?<=[.!?。])\s+|(?<=[다요죠니다습니다])\.\s*", text)
+    sentences = re.findall(r"[^.!?。]+[.!?。]?", text)
     return [normalize_space(sentence) for sentence in sentences if normalize_space(sentence)]
 
 
 def trim_text(text: str, limit: int) -> str:
-    text = normalize_space(text)
+    text = remove_ellipsis(text)
     if len(text) <= limit:
         return text
-    return text[: limit - 3].rstrip(" .") + "..."
+    return text[:limit].rstrip(" .,")
+
+
+def ensure_clear_ending(text: str) -> str:
+    text = remove_ellipsis(text).rstrip(" ,")
+    if not text:
+        return ""
+    if text[-1] in ".!?。":
+        return text
+    if re.search(r"(다|요|죠|니다|습니다|됩니다|합니다|했습니다)$", text):
+        return text + "."
+    return text + "입니다."
+
+
+def ensure_title_ending(text: str) -> str:
+    text = remove_ellipsis(text).rstrip(" ,")
+    if not text:
+        return ""
+    if text[-1] in ".!?。":
+        return text
+    return text + "."
+
+
+def extract_weather(summary: str) -> str:
+    for raw_line in summary.splitlines():
+        line = raw_line.strip()
+        if line.startswith("🌤️"):
+            return ensure_clear_ending(clean_for_speech(line))
+    return ""
 
 
 def extract_articles(summary: str) -> list[dict[str, str]]:
@@ -149,7 +182,10 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
         body = trim_text(body, 260)
         if not title or not body:
             continue
-        candidate = f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. {title}. 주요 내용은 {body}"
+        candidate = (
+            f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. "
+            f"{ensure_title_ending(title)} 주요 내용은 {ensure_clear_ending(body)}"
+        )
         projected = len("\n".join([*lines, candidate]))
         if lines and projected > max_chars:
             break
@@ -158,18 +194,27 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
 
 
 def markdown_to_speech(summary: str, target_date: str, target_minutes: float = 5.0) -> str:
+    weather = extract_weather(summary)
     articles = extract_articles(summary)
     max_chars = max(700, int(target_minutes * 900))
     intro = f"{target_date} 병무청 뉴스 음성 브리핑입니다."
     if not articles:
-        return "\n".join([intro, "네이버 뉴스 기준으로 공유할 만한 병무청 관련 주요 기사가 많지 않았습니다."])
+        lines = [intro]
+        if weather:
+            lines.append(weather)
+        lines.append("네이버 뉴스 기준으로 공유할 만한 병무청 관련 주요 기사가 많지 않았습니다.")
+        return "\n".join(lines)
 
-    opening = f"오늘은 주요 기사 {len(articles)}건을 제목과 핵심 내용 중심으로 짧게 전해드립니다."
+    opening = f"오늘은 주요 기사 {len(articles)}건을 제목과 핵심 내용 중심으로 전해드리겠습니다."
     lines = build_compact_lines(articles, max_chars=max_chars - len(intro) - len(opening) - 40)
     if len(lines) < len(articles):
         lines.append("나머지 기사는 중복이거나 관련성이 낮아 음성 요약에서는 줄였습니다.")
-    closing = "자세한 신청 조건과 일정은 원문 기사와 병무청 공식 안내를 함께 확인해 주세요."
-    return "\n".join([intro, opening, *lines, closing])
+    closing = "자세한 신청 조건과 일정은 원문 기사와 병무청 공식 안내를 함께 확인하시기 바랍니다."
+    output = [intro]
+    if weather:
+        output.append(weather)
+    output.extend([opening, *lines, closing])
+    return "\n".join(output)
 
 
 async def synthesize_edge(text: str, output_path: Path, voice: str, rate: str, pitch: str) -> None:

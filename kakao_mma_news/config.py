@@ -76,6 +76,11 @@ class Config:
     codex_model: str
     codex_timeout_seconds: float
 
+    weather_enabled: bool
+    weather_location: str
+    weather_latitude: float
+    weather_longitude: float
+
     naver_client_id: str
     naver_client_secret: str
     naver_news_enabled: bool
@@ -140,6 +145,10 @@ def load_config(env_file: str | Path | None = ".env") -> Config:
         codex_command=os.getenv("CODEX_COMMAND", "codex.cmd"),
         codex_model=os.getenv("CODEX_MODEL", ""),
         codex_timeout_seconds=parse_float(os.getenv("CODEX_TIMEOUT_SECONDS"), 300.0),
+        weather_enabled=parse_bool(os.getenv("WEATHER_ENABLED"), True),
+        weather_location=os.getenv("WEATHER_LOCATION", "서울"),
+        weather_latitude=parse_float(os.getenv("WEATHER_LATITUDE"), 37.5665),
+        weather_longitude=parse_float(os.getenv("WEATHER_LONGITUDE"), 126.9780),
         naver_client_id=os.getenv("NAVER_CLIENT_ID", ""),
         naver_client_secret=os.getenv("NAVER_CLIENT_SECRET", ""),
         naver_news_enabled=parse_bool(os.getenv("NAVER_NEWS_ENABLED"), True),

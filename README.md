@@ -6,6 +6,7 @@
 
 - 뉴스 수집: 기본은 k-skill `naver-news-search` 프록시 기반 네이버 뉴스 검색, 선택적으로 정책브리핑 RSS/Google News RSS/네이버 공식 API 직접 호출
 - 요약: self-hosted 실행에서는 로그인된 Codex CLI를 LLM으로 사용, GitHub-hosted 요약 전용 workflow는 `OPENAI_API_KEY`가 있으면 OpenAI API를 쓰고 없으면 제목/요약 기반 간단 요약
+- 날씨: 요약 첫머리에 오늘 날씨와 미세먼지 요약을 붙이며, 기본 위치는 서울입니다.
 - 게시: Windows PC 카카오톡 GUI를 `pyautogui`로 제어
 - GitHub Actions: 수집/요약은 가능하지만, 단톡방 게시는 카카오톡이 로그인된 Windows PC 또는 self-hosted runner에서만 가능
 - 음성 요약: `edge-tts`로 MP3를 만들고 `podcast/` 정적 플레이어에서 재생
@@ -63,6 +64,7 @@ PC 카카오톡이 로그인되어 있고, 잠금 화면이 아니며, 단톡방
 ```
 
 생성 결과는 `podcast/audio/YYYY-MM-DD.mp3`, `podcast/scripts/YYYY-MM-DD.txt`, `podcast/manifest.json`에 저장됩니다. 음성 스크립트는 인사말 뒤 기사 제목과 주요 내용 1~2문장만 읽도록 압축하며, 기본 목표 길이는 5분 상한입니다. `podcast/index.html`은 GitHub Pages에서 `manifest.json`을 읽어 최신 음성 요약을 재생합니다.
+요약문과 음성 스크립트는 줄임표를 쓰지 않고 경어체 종결형으로 정리합니다.
 
 ## 매일 자동 실행
 
@@ -86,6 +88,10 @@ GitHub 저장소 설정에서 아래 값을 준비하세요.
 - Repository variable `SUMMARY_PROVIDER`: 선택, self-hosted 게시 workflow 기본값은 `codex`
 - Repository variable `CODEX_COMMAND`: 선택, 기본값은 `C:\Users\April\AppData\Roaming\npm\codex.cmd`
 - Repository variable `CODEX_TIMEOUT_SECONDS`: 선택, 기본값은 `300`
+- Repository variable `WEATHER_ENABLED`: 선택, 기본값은 `true`
+- Repository variable `WEATHER_LOCATION`: 선택, 기본값은 `서울`
+- Repository variable `WEATHER_LATITUDE`: 선택, 기본값은 `37.5665`
+- Repository variable `WEATHER_LONGITUDE`: 선택, 기본값은 `126.9780`
 - Repository variable `PODCAST_BASE_URL`: 선택, 기본값은 `https://<owner>.github.io/<repo>/podcast/`
 - Repository variable `PODCAST_LISTEN_URL_TEMPLATE`: 선택, private repo처럼 Pages를 못 쓰면 `https://github.com/<owner>/<repo>/blob/main/podcast/audio/{date}.mp3`
 - Repository variable `TTS_VOICE`: 선택, 기본값은 `ko-KR-SunHiNeural`
