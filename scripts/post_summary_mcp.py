@@ -54,7 +54,7 @@ async def post_summary(args: argparse.Namespace) -> int:
     summary_path = Path(args.summary)
     if not summary_path.exists():
         raise FileNotFoundError(f"Summary file not found: {summary_path}")
-    message = summary_path.read_text(encoding="utf-8").strip()
+    message = summary_path.read_text(encoding="utf-8").lstrip("\ufeff").strip()
     if not message:
         raise RuntimeError(f"Summary file is empty: {summary_path}")
 

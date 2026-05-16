@@ -87,6 +87,7 @@ GitHub 저장소 설정에서 아래 값을 준비하세요.
 - Repository variable `CODEX_COMMAND`: 선택, 기본값은 `C:\Users\April\AppData\Roaming\npm\codex.cmd`
 - Repository variable `CODEX_TIMEOUT_SECONDS`: 선택, 기본값은 `300`
 - Repository variable `PODCAST_BASE_URL`: 선택, 기본값은 `https://<owner>.github.io/<repo>/podcast/`
+- Repository variable `PODCAST_LISTEN_URL_TEMPLATE`: 선택, private repo처럼 Pages를 못 쓰면 `https://github.com/<owner>/<repo>/blob/main/podcast/audio/{date}.mp3`
 - Repository variable `TTS_VOICE`: 선택, 기본값은 `ko-KR-SunHiNeural`
 - Repository variable `KSKILL_PROXY_BASE_URL`: 선택, 기본값은 `https://k-skill-proxy.nomadamas.org`
 - Secret `OPENAI_API_KEY`: 선택, `SUMMARY_PROVIDER=auto` 또는 `openai`일 때 사용합니다.
