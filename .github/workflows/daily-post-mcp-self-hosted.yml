@@ -61,7 +61,11 @@ jobs:
           if ($null -eq $summary) {
             throw "No summary Markdown file found in runs/."
           }
-          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --verify
+          $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
+          if (!(Test-Path $mcpCommand)) {
+            throw "kakaotalk-mcp executable was not found: $mcpCommand"
+          }
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --mcp-command "$mcpCommand" --verify
 
       - uses: actions/upload-artifact@v4
         if: always()
