@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms, strip_html
-from kakao_mma_news.summarize import summarize_heuristic
+from kakao_mma_news.summarize import _load_json_object, _render_codex_summary, summarize_heuristic
 
 
 class CoreTests(unittest.TestCase):
@@ -48,6 +48,24 @@ class CoreTests(unittest.TestCase):
         self.assertIn("# 1️⃣ 서울지방병무청 행사", summary)
         self.assertIn("Opinion:", summary)
         self.assertIn("오늘 한 줄 요약", summary)
+
+    def test_codex_json_render_format(self):
+        article = Article(
+            "전북지방병무청 경진대회",
+            "https://example.com/news",
+            "example.com",
+            datetime(2026, 5, 15, tzinfo=timezone.utc),
+            "전북지방병무청이 업무 인수인계 개선 경진대회를 열었다.",
+            "test",
+        )
+        data = _load_json_object(
+            '```json\n{"items":[{"title":"전북지방병무청 경진대회","summary":"업무 인수인계 개선을 위한 행사다.","opinion":"행정 품질 개선 효과를 확인할 필요가 있다.","source":"example.com","url":"https://example.com/news"}],"excluded_note":"","one_line":"지방병무청 업무 개선 소식이 중심이었다."}\n```'
+        )
+        summary = _render_codex_summary(article.published_date_kst, data, [article])
+        self.assertIn("🪖 2026-05-15 병무청 뉴스 브리핑", summary)
+        self.assertIn("# 1️⃣ 전북지방병무청 경진대회", summary)
+        self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
+        self.assertIn("Source: example.com / https://example.com/news", summary)
 
 
 if __name__ == "__main__":

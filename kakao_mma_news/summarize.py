@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import tempfile
 from datetime import date
+from pathlib import Path
+from typing import Any
 
 from .config import Config
 from .news import Article, normalize_space
@@ -25,6 +30,28 @@ def article_payload(articles: list[Article]) -> list[dict[str, str]]:
                 "published_at": published,
                 "summary": article.summary[:700],
                 "content": article.content[:1500],
+                "url": article.url,
+            }
+        )
+    return payload
+
+
+def codex_article_payload(articles: list[Article], limit: int = 12) -> list[dict[str, str]]:
+    payload = []
+    for idx, article in enumerate(articles[:limit], start=1):
+        published = (
+            article.published_at.astimezone().isoformat(timespec="minutes")
+            if article.published_at
+            else ""
+        )
+        payload.append(
+            {
+                "no": str(idx),
+                "title": article.title[:180],
+                "source": article.source[:80],
+                "published_at": published,
+                "summary": article.summary[:600],
+                "content": article.content[:500],
                 "url": article.url,
             }
         )
@@ -103,6 +130,217 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
     if not chunks:
         raise RuntimeError("OpenAI 응답에서 텍스트를 찾지 못했습니다.")
     return "\n".join(chunks).strip()
+
+
+def _clean_text(value: object, limit: int = 0) -> str:
+    if value is None:
+        return ""
+    text = normalize_space(str(value))
+    if limit and len(text) > limit:
+        return text[: limit - 3].rstrip() + "..."
+    return text
+
+
+def _load_json_object(raw_text: str) -> dict[str, Any]:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or start >= end:
+            raise
+        data = json.loads(text[start : end + 1])
+
+    if not isinstance(data, dict):
+        raise ValueError("Codex CLI 응답이 JSON 객체가 아닙니다.")
+    return data
+
+
+def _render_codex_summary(
+    target_date: date, data: dict[str, Any], articles: list[Article]
+) -> str:
+    lines = [
+        f"🪖 {target_date.isoformat()} 병무청 뉴스 브리핑",
+        "전날 네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. 개별 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
+        "",
+        "---",
+        "",
+        "오늘의 병무청 뉴스 톡 📡",
+    ]
+
+    rendered_items = 0
+    raw_items = data.get("items", [])
+    if isinstance(raw_items, list):
+        for item in raw_items[:8]:
+            if not isinstance(item, dict):
+                continue
+            title = _clean_text(item.get("title"), 120)
+            summary = _clean_text(item.get("summary"), 450)
+            opinion = _clean_text(item.get("opinion"), 260)
+            source = _clean_text(item.get("source"), 80) or "네이버 뉴스"
+            url = _clean_text(item.get("url"), 500)
+            if not title or not summary:
+                continue
+
+            rendered_items += 1
+            number = (
+                NUMBER_EMOJI[rendered_items - 1]
+                if rendered_items <= len(NUMBER_EMOJI)
+                else f"{rendered_items}."
+            )
+            fallback_article = (
+                articles[rendered_items - 1] if rendered_items <= len(articles) else None
+            )
+            fallback_opinion = (
+                _article_opinion(fallback_article)
+                if fallback_article
+                else "병무청 관련 행정·제도 흐름을 확인할 수 있는 기사예요. 실제 세부 조건은 원문과 공식 안내에서 확인하는 게 좋습니다."
+            )
+            lines.extend(
+                [
+                    f"# {number} {title}",
+                    f"{summary} 🎯",
+                    f"Opinion: {opinion or fallback_opinion}",
+                    f"Source: {source}{' / ' + url if url else ''}",
+                    "",
+                ]
+            )
+
+    if rendered_items == 0:
+        lines.extend(["확인된 주요 뉴스가 없습니다.", ""])
+
+    excluded_note = _clean_text(data.get("excluded_note"), 220)
+    if excluded_note:
+        lines.extend([excluded_note, ""])
+
+    one_line = _clean_text(data.get("one_line"), 220)
+    if not one_line:
+        one_line = _one_line_summary(articles) if articles else "오늘은 공유할 만한 병무청 직접 관련 뉴스가 확인되지 않았습니다."
+
+    lines.extend(
+        [
+            "---",
+            "",
+            "오늘 한 줄 요약 🎯",
+            one_line,
+            "",
+            "---",
+            "",
+            "💡 병역·입영·복무 관련 일정은 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 공식 안내를 한 번 더 확인해 주세요.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def summarize_with_codex(config: Config, target_date: date, articles: list[Article]) -> str:
+    output_dir = Path(config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "target_date": target_date.isoformat(),
+        "total_articles": len(articles),
+        "articles": codex_article_payload(articles),
+    }
+    input_file = tempfile.NamedTemporaryFile(
+        prefix=f"codex-input-{target_date.isoformat()}-",
+        suffix=".json",
+        dir=output_dir,
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    )
+    json.dump(payload, input_file, ensure_ascii=False)
+    input_path = Path(input_file.name)
+    input_file.close()
+
+    prompt = " ".join(
+        [
+            "Task: Summarize the Korean news articles now.",
+            "Your entire final answer must be exactly one valid JSON object.",
+            "Do not acknowledge, do not explain, do not write Markdown, and do not wrap it in a code block.",
+            "Write all JSON string values in concise Korean.",
+            f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
+            "Do not ask the user to paste articles; the file already exists in the workspace.",
+            "Do not infer unsupported facts.",
+            "Exclude or briefly down-rank articles that are weakly related to 병무청.",
+            "For opinion, write only a cautious 병무행정 관점의 확인 포인트.",
+            'Required JSON schema: {"items":[{"title":"기사 제목","summary":"기사 요약 2~3문장","opinion":"병무행정 관점의 확인 포인트 1~2문장","source":"매체명","url":"원문 URL"}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}',
+            "items는 최대 8개만 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
+        ]
+    )
+    output_file = tempfile.NamedTemporaryFile(
+        prefix=f"codex-summary-{target_date.isoformat()}-",
+        suffix=".md",
+        dir=output_dir,
+        delete=False,
+    )
+    output_path = Path(output_file.name)
+    output_file.close()
+
+    command = [
+        config.codex_command,
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        "-o",
+        str(output_path),
+    ]
+    if config.codex_model:
+        command.extend(["--model", config.codex_model])
+    command.append(prompt)
+
+    env = os.environ.copy()
+    env.setdefault("NO_COLOR", "1")
+    try:
+        result = subprocess.run(
+            command,
+            input="",
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=config.codex_timeout_seconds,
+            env=env,
+            check=False,
+        )
+        if result.returncode != 0:
+            details = "\n".join(
+                part.strip()
+                for part in [result.stdout[-2000:], result.stderr[-2000:]]
+                if part.strip()
+            )
+            raise RuntimeError(f"Codex CLI 요약 실패(exit {result.returncode}): {details}")
+
+        raw_summary = output_path.read_text(encoding="utf-8").strip()
+        if not raw_summary:
+            raise RuntimeError("Codex CLI가 빈 요약을 반환했습니다.")
+        try:
+            summary_data = _load_json_object(raw_summary)
+        except Exception as exc:
+            debug_path = output_dir / f"codex-raw-{target_date.isoformat()}.txt"
+            debug_path.write_text(raw_summary, encoding="utf-8")
+            raise RuntimeError(f"Codex CLI JSON 파싱 실패(raw: {debug_path}): {exc}") from exc
+        return _render_codex_summary(target_date, summary_data, articles)
+    finally:
+        try:
+            output_path.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            input_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _trim_sentence(value: str, limit: int = 180) -> str:
@@ -198,6 +436,19 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
 
 
 def build_summary(config: Config, target_date: date, articles: list[Article]) -> str:
+    provider = config.summary_provider
+    if provider == "codex":
+        try:
+            return summarize_with_codex(config, target_date, articles)
+        except Exception as exc:
+            fallback = summarize_heuristic(target_date, articles)
+            return f"{fallback}\n\n요약 모델 호출 실패: {exc}"
+    if provider == "openai":
+        return summarize_with_openai(config, target_date, articles)
+    if provider in {"heuristic", "none", "fallback"}:
+        return summarize_heuristic(target_date, articles)
+    if provider not in {"auto", ""}:
+        raise RuntimeError(f"지원하지 않는 SUMMARY_PROVIDER입니다: {provider}")
     if config.openai_api_key:
         try:
             return summarize_with_openai(config, target_date, articles)

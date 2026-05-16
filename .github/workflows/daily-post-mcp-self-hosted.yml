@@ -37,6 +37,10 @@ jobs:
       - name: Build Naver news summary
         shell: powershell
         env:
+          SUMMARY_PROVIDER: ${{ vars.SUMMARY_PROVIDER || 'codex' }}
+          CODEX_COMMAND: ${{ vars.CODEX_COMMAND || 'C:\Users\April\AppData\Roaming\npm\codex.cmd' }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL || '' }}
+          CODEX_TIMEOUT_SECONDS: ${{ vars.CODEX_TIMEOUT_SECONDS || '300' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
           NAVER_NEWS_ENABLED: "true"

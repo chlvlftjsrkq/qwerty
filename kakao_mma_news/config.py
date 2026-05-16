@@ -71,6 +71,10 @@ class Config:
 
     openai_api_key: str
     openai_model: str
+    summary_provider: str
+    codex_command: str
+    codex_model: str
+    codex_timeout_seconds: float
 
     naver_client_id: str
     naver_client_secret: str
@@ -132,6 +136,10 @@ def load_config(env_file: str | Path | None = ".env") -> Config:
         kakao_step_delay_seconds=parse_float(os.getenv("KAKAO_STEP_DELAY_SECONDS"), 0.7),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        summary_provider=os.getenv("SUMMARY_PROVIDER", "auto").strip().lower() or "auto",
+        codex_command=os.getenv("CODEX_COMMAND", "codex.cmd"),
+        codex_model=os.getenv("CODEX_MODEL", ""),
+        codex_timeout_seconds=parse_float(os.getenv("CODEX_TIMEOUT_SECONDS"), 300.0),
         naver_client_id=os.getenv("NAVER_CLIENT_ID", ""),
         naver_client_secret=os.getenv("NAVER_CLIENT_SECRET", ""),
         naver_news_enabled=parse_bool(os.getenv("NAVER_NEWS_ENABLED"), True),
