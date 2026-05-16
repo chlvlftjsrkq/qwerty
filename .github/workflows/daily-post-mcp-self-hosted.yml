@@ -19,18 +19,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify local Python
-        shell: pwsh
+        shell: powershell
         run: py -3 --version
 
       - name: Install dependencies
-        shell: pwsh
+        shell: powershell
         run: |
           py -3 -m pip install --upgrade pip
           py -3 -m pip install -r requirements.txt
           py -3 -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
 
       - name: Build Naver news summary
-        shell: pwsh
+        shell: powershell
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
@@ -46,7 +46,7 @@ jobs:
           py @argsList
 
       - name: Post summary to KakaoTalk
-        shell: pwsh
+        shell: powershell
         env:
           TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
         run: |
