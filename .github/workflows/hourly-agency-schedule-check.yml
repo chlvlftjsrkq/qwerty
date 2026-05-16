@@ -1,0 +1,86 @@
+name: Hourly Agency Schedule Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      kst_hour:
+        description: "Optional KST hour override, 0-23."
+        required: false
+        default: ""
+  schedule:
+    # Every hour at HH:07 KST. GitHub cron is UTC, so :07 UTC maps to :07 KST.
+    - cron: "7 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select agency for this KST hour
+        id: select
+        shell: python
+        env:
+          KST_HOUR_INPUT: ${{ github.event.inputs.kst_hour || '' }}
+        run: |
+          import json
+          import os
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          schedule_path = Path("config/agency_schedule.json")
+          schedule = json.loads(schedule_path.read_text(encoding="utf-8"))
+          now_kst = datetime.now(ZoneInfo(schedule["timezone"]))
+          raw_hour = os.environ.get("KST_HOUR_INPUT", "").strip()
+          kst_hour = int(raw_hour) if raw_hour else now_kst.hour
+          agencies = {int(item["kst_hour"]): item for item in schedule["agencies"]}
+          if kst_hour not in agencies:
+            raise SystemExit(f"No agency configured for KST hour {kst_hour}")
+          selected = agencies[kst_hour]
+
+          report_dir = Path("runs")
+          report_dir.mkdir(exist_ok=True)
+          report = {
+            "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+            "workflow": os.environ.get("GITHUB_WORKFLOW"),
+            "run_id": os.environ.get("GITHUB_RUN_ID"),
+            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+            "now_kst": now_kst.isoformat(timespec="seconds"),
+            "kst_hour": kst_hour,
+            "agency": selected["agency"],
+            "weather_location": selected["weather_location"],
+            "weather_latitude": selected["weather_latitude"],
+            "weather_longitude": selected["weather_longitude"],
+          }
+          report_path = report_dir / f"agency-schedule-check-{now_kst:%Y%m%d-%H%M%S}.json"
+          report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"agency={selected['agency']}\n")
+            output.write(f"weather_location={selected['weather_location']}\n")
+            output.write(f"kst_hour={kst_hour}\n")
+            output.write(f"report_path={report_path.as_posix()}\n")
+
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+
+      - name: Write schedule summary
+        shell: bash
+        run: |
+          {
+            echo "### Hourly agency schedule check"
+            echo ""
+            echo "- KST hour: ${{ steps.select.outputs.kst_hour }}"
+            echo "- Agency: ${{ steps.select.outputs.agency }}"
+            echo "- Weather location: ${{ steps.select.outputs.weather_location }}"
+            echo "- Event: ${{ github.event_name }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agency-schedule-check
+          path: ${{ steps.select.outputs.report_path }}

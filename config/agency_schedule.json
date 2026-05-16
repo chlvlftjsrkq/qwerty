@@ -1,0 +1,174 @@
+{
+  "timezone": "Asia/Seoul",
+  "minute": 7,
+  "agencies": [
+    {
+      "kst_hour": 0,
+      "agency": "고용노동부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 1,
+      "agency": "국토교통부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 2,
+      "agency": "해양수산부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 3,
+      "agency": "중소벤처기업부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 4,
+      "agency": "식품의약품안전처",
+      "weather_location": "청주",
+      "weather_latitude": 36.6424,
+      "weather_longitude": 127.4890
+    },
+    {
+      "kst_hour": 5,
+      "agency": "공정거래위원회",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 6,
+      "agency": "국민권익위원회",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 7,
+      "agency": "경찰청",
+      "weather_location": "서울",
+      "weather_latitude": 37.5665,
+      "weather_longitude": 126.9780
+    },
+    {
+      "kst_hour": 8,
+      "agency": "병무청",
+      "weather_location": "대전",
+      "weather_latitude": 36.3504,
+      "weather_longitude": 127.3845
+    },
+    {
+      "kst_hour": 9,
+      "agency": "행정안전부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 10,
+      "agency": "개인정보보호위원회",
+      "weather_location": "서울",
+      "weather_latitude": 37.5665,
+      "weather_longitude": 126.9780
+    },
+    {
+      "kst_hour": 11,
+      "agency": "재정경제부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 12,
+      "agency": "기획예산처",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 13,
+      "agency": "과학기술정보통신부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 14,
+      "agency": "교육부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 15,
+      "agency": "외교부",
+      "weather_location": "서울",
+      "weather_latitude": 37.5665,
+      "weather_longitude": 126.9780
+    },
+    {
+      "kst_hour": 16,
+      "agency": "법무부",
+      "weather_location": "과천",
+      "weather_latitude": 37.4292,
+      "weather_longitude": 126.9877
+    },
+    {
+      "kst_hour": 17,
+      "agency": "국방부",
+      "weather_location": "서울",
+      "weather_latitude": 37.5665,
+      "weather_longitude": 126.9780
+    },
+    {
+      "kst_hour": 18,
+      "agency": "국가보훈부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 19,
+      "agency": "문화체육관광부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 20,
+      "agency": "농림축산식품부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 21,
+      "agency": "산업통상자원부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 22,
+      "agency": "보건복지부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 23,
+      "agency": "기후에너지환경부",
+      "weather_location": "세종",
+      "weather_latitude": 36.4800,
+      "weather_longitude": 127.2890
+    }
+  ]
+}
