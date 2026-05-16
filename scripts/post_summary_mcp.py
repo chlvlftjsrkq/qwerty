@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import shutil
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+from kakao_mma_news.kakao import split_message
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Post a generated summary Markdown file via kakaotalk-mcp.")
+    parser.add_argument("--room", required=True, help="KakaoTalk chat room title")
+    parser.add_argument("--summary", required=True, help="Path to summary Markdown file")
+    parser.add_argument("--mcp-command", default="", help="kakaotalk-mcp executable path")
+    parser.add_argument("--max-chars", type=int, default=3000, help="Maximum characters per KakaoTalk message")
+    parser.add_argument("--verify", action="store_true", help="Read recent messages and verify the first chunk")
+    return parser.parse_args()
+
+
+def resolve_mcp_command(value: str) -> str:
+    if value:
+        return value
+    found = shutil.which("kakaotalk-mcp") or shutil.which("kakaotalk-mcp.exe")
+    if not found:
+        raise RuntimeError("kakaotalk-mcp executable was not found on PATH.")
+    return found
+
+
+def parse_tool_json(result: Any) -> dict[str, Any]:
+    text = "\n".join(getattr(item, "text", repr(item)) for item in result.content)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {"raw": text}
+
+
+async def call_tool(session: ClientSession, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    result = await session.call_tool(name, arguments)
+    return parse_tool_json(result)
+
+
+async def post_summary(args: argparse.Namespace) -> int:
+    summary_path = Path(args.summary)
+    if not summary_path.exists():
+        raise FileNotFoundError(f"Summary file not found: {summary_path}")
+    message = summary_path.read_text(encoding="utf-8").strip()
+    if not message:
+        raise RuntimeError(f"Summary file is empty: {summary_path}")
+
+    chunks = split_message(message, args.max_chars)
+    command = resolve_mcp_command(args.mcp_command)
+    params = StdioServerParameters(command=command, args=[])
+
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            health = await call_tool(session, "kakao_health_check", {})
+            if not health.get("running"):
+                print(json.dumps({"health": health}, ensure_ascii=False))
+                raise RuntimeError("KakaoTalk is not running on this Windows runner.")
+
+            open_result = await call_tool(session, "kakao_open_room", {"room_name": args.room})
+            if open_result.get("error"):
+                print(json.dumps({"open_result": open_result}, ensure_ascii=False))
+                raise RuntimeError(f"Failed to open KakaoTalk room: {args.room}")
+
+            sent = []
+            for index, chunk in enumerate(chunks, start=1):
+                body = chunk if len(chunks) == 1 else f"({index}/{len(chunks)})\n{chunk}"
+                result = await call_tool(
+                    session,
+                    "kakao_send_message",
+                    {"room_name": args.room, "message": body},
+                )
+                sent.append(result)
+                if result.get("error"):
+                    print(json.dumps({"send_results": sent}, ensure_ascii=False))
+                    raise RuntimeError(f"Failed to send chunk {index}/{len(chunks)}")
+
+            verify_found = None
+            if args.verify:
+                read_result = await call_tool(
+                    session,
+                    "kakao_read_messages",
+                    {"room_name": args.room, "max_messages": 5},
+                )
+                recent = read_result.get("messages") or []
+                marker = chunks[0][:80]
+                verify_found = any(
+                    marker in (message.get("text") or "")
+                    for message in recent
+                    if isinstance(message, dict)
+                )
+
+            print(
+                json.dumps(
+                    {
+                        "room": args.room,
+                        "summary": str(summary_path),
+                        "chunks": len(chunks),
+                        "sent": sent,
+                        "verify_found": verify_found,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+    return 0
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    args = parse_args()
+    return asyncio.run(post_summary(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

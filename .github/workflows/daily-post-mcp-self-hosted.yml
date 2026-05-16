@@ -1,0 +1,68 @@
+name: Daily MMA News Kakao Post via MCP
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Summary date in YYYY-MM-DD. Leave blank for yesterday in KST."
+        required: false
+        default: ""
+  schedule:
+    # 08:00 KST
+    - cron: "0 23 * * *"
+
+jobs:
+  post:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
+
+      - name: Build Naver news summary
+        shell: pwsh
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
+          NAVER_NEWS_ENABLED: "true"
+          GOOGLE_NEWS_ENABLED: "false"
+          POLICY_RSS_ENABLED: "false"
+          KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
+        run: |
+          $argsList = @("-m", "kakao_mma_news", "--dry-run")
+          if ("${{ inputs.target_date }}" -ne "") {
+            $argsList += @("--date", "${{ inputs.target_date }}")
+          }
+          python @argsList
+
+      - name: Post summary to KakaoTalk
+        shell: pwsh
+        env:
+          TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
+            throw "Repository variable TARGET_CHATROOM is required."
+          }
+          $summary = Get-ChildItem -Path runs -Filter "summary-*.md" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if ($null -eq $summary) {
+            throw "No summary Markdown file found in runs/."
+          }
+          python scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --verify
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mma-news-runs
+          path: runs/

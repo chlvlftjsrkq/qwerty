@@ -1,0 +1,31 @@
+name: Daily MMA News Summary
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 08:00 KST
+    - cron: "0 23 * * *"
+
+jobs:
+  summarize:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Build summary
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
+          NAVER_NEWS_ENABLED: "true"
+          GOOGLE_NEWS_ENABLED: "false"
+          POLICY_RSS_ENABLED: "false"
+          KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
+        run: python -m kakao_mma_news --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mma-news-summary
+          path: runs/
