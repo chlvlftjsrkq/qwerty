@@ -1,5 +1,5 @@
 {
-  "count": 2,
+  "count": 3,
   "runs": [
     {
       "number": 1,
@@ -24,6 +24,18 @@
       "ref_name": "main",
       "sha": "bdd5b2139f58af442c55702d1450e21c047d0ed1",
       "run_url": "https://github.com/chlvlftjsrkq/qwerty/actions/runs/25986065523"
+    },
+    {
+      "number": 3,
+      "recorded_at_utc": "2026-05-17T10:11:37+00:00",
+      "event_name": "schedule",
+      "workflow": "Simple Schedule 10",
+      "run_id": "25987987332",
+      "run_number": "3",
+      "run_attempt": "1",
+      "ref_name": "main",
+      "sha": "431a9ece72ccda1ffbf655d4a96c2425c8f62ad2",
+      "run_url": "https://github.com/chlvlftjsrkq/qwerty/actions/runs/25987987332"
     }
   ]
 }
