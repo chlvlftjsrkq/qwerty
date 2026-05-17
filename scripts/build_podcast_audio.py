@@ -101,7 +101,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_space(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip()
+    text = re.sub(r"\s+", " ", value).strip()
+    text = re.sub(r"\s+([,.;:!?。])", r"\1", text)
+    text = re.sub(r"([(（])\s+", r"\1", text)
+    return text
 
 
 def remove_ellipsis(value: str) -> str:
