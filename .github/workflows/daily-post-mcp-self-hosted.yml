@@ -1,10 +1,17 @@
 name: Daily MMA News Kakao Post via MCP
 
-run-name: Daily MMA News Kakao Post via MCP - ${{ inputs.agency || inputs.agency_index || 'auto' }}
+run-name: Daily MMA News Kakao Post via MCP - ${{ github.event_name == 'schedule' && 'github-cron-0815' || github.event.inputs.trigger_source || github.event.inputs.agency || github.event.inputs.agency_index || 'auto' }}
 
 on:
+  schedule:
+    # 08:15 KST daily backup trigger. GitHub cron is UTC.
+    - cron: "15 23 * * *"
   workflow_dispatch:
     inputs:
+      trigger_source:
+        description: "실행 출처 표시용 값입니다. 예: pc-scheduler-0807"
+        required: false
+        default: ""
       agency_index:
         description: "기관 순번입니다. auto이면 현재 KST 시각에 맞는 기관을 선택합니다."
         required: false
@@ -50,7 +57,7 @@ jobs:
       cancel-in-progress: false
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
-      TARGET_DATE_INPUT: ${{ inputs.target_date }}
+      TARGET_DATE_INPUT: ${{ github.event.inputs.target_date }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,10 +65,11 @@ jobs:
         id: agency
         shell: powershell
         env:
-          AGENCY_INDEX_INPUT: ${{ inputs.agency_index }}
-          AGENCY_NAME_INPUT: ${{ inputs.agency }}
-          INCLUDE_WEATHER_INPUT: ${{ inputs.include_weather_in_summary }}
-          TARGET_DATE_INPUT: ${{ inputs.target_date }}
+          AGENCY_INDEX_INPUT: ${{ github.event.inputs.agency_index }}
+          AGENCY_NAME_INPUT: ${{ github.event.inputs.agency }}
+          TRIGGER_SOURCE_INPUT: ${{ github.event.inputs.trigger_source }}
+          INCLUDE_WEATHER_INPUT: ${{ github.event.inputs.include_weather_in_summary }}
+          TARGET_DATE_INPUT: ${{ github.event.inputs.target_date }}
         run: |
           $ErrorActionPreference = "Stop"
           $schedule = Get-Content -Path "config\agency_schedule.json" -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -104,6 +112,14 @@ jobs:
 
           $selected = $agencies[$selectedIndex]
           $agencyName = [string]$selected.agency
+          $triggerSource = "$env:TRIGGER_SOURCE_INPUT".Trim()
+          if ([string]::IsNullOrWhiteSpace($triggerSource)) {
+            if ($env:GITHUB_EVENT_NAME -eq "schedule") {
+              $triggerSource = "github-cron-0815"
+            } else {
+              $triggerSource = "manual-dispatch"
+            }
+          }
           $agencySlug = ($agencyName -replace "[^\p{L}\p{Nd}]+", "-").Trim("-")
           if ([string]::IsNullOrWhiteSpace($agencySlug)) {
             $agencySlug = "agency-$selectedIndex"
@@ -129,6 +145,7 @@ jobs:
             "TARGET_DATE_RESOLVED=$targetDate",
             "NEWS_QUERY_TERMS=$queryTerms",
             "NEWS_REQUIRED_TERMS=$agencyName",
+            "TRIGGER_SOURCE=$triggerSource",
             "WEATHER_ENABLED=$includeWeather",
             "WEATHER_LOCATION=$($selected.weather_location)",
             "WEATHER_LATITUDE=$($selected.weather_latitude)",
@@ -142,9 +159,11 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "agency_index=$selectedIndex" -Encoding UTF8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "episode_id=$episodeId" -Encoding UTF8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "target_date=$targetDate" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "trigger_source=$triggerSource" -Encoding UTF8
 
           Write-Host "Selected agency: $agencyName"
           Write-Host "Selected agency index: $selectedIndex"
+          Write-Host "Trigger source: $triggerSource"
           Write-Host "Target date: $targetDate"
           Write-Host "Episode id: $episodeId"
           Write-Host "Weather location: $($selected.weather_location)"
@@ -216,7 +235,7 @@ jobs:
           [System.IO.File]::WriteAllText($messagePath, "$label`n$listenUrl", $utf8NoBom)
 
       - name: Archive summary to repository
-        if: ${{ inputs.archive_results == true }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.archive_results == 'true' }}
         shell: powershell
         run: |
           $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
@@ -290,7 +309,7 @@ jobs:
           }
 
       - name: Post summary to KakaoTalk
-        if: ${{ inputs.send_summary == true }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.send_summary == 'true' }}
         shell: powershell
         env:
           TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
@@ -309,7 +328,7 @@ jobs:
           & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand" --verify
 
       - name: Post podcast link to KakaoTalk
-        if: ${{ inputs.send_podcast == true }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.send_podcast == 'true' }}
         shell: powershell
         env:
           TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
@@ -333,6 +352,7 @@ jobs:
         run: |
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Agency Kakao dispatch" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Trigger source: $env:TRIGGER_SOURCE" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Agency: $env:AGENCY_NAME" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Agency index: $env:AGENCY_INDEX" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target date: $env:TARGET_DATE_RESOLVED" -Encoding UTF8

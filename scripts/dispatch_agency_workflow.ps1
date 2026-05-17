@@ -10,7 +10,8 @@ param(
     [string]$SendSummary = "true",
     [string]$SendPodcast = "true",
     [string]$IncludeWeatherInSummary = "true",
-    [string]$ArchiveResults = "true"
+    [string]$ArchiveResults = "true",
+    [string]$TriggerSource = "pc-scheduler-0807"
 )
 
 $ErrorActionPreference = "Stop"
@@ -78,6 +79,7 @@ $argsList = @(
     "--ref", $Ref,
     "--field", "agency_index=$selectedIndex",
     "--field", "agency=$agencyName",
+    "--field", "trigger_source=$TriggerSource",
     "--field", "send_summary=$(Convert-ToWorkflowBool $SendSummary)",
     "--field", "send_podcast=$(Convert-ToWorkflowBool $SendPodcast)",
     "--field", "include_weather_in_summary=$(Convert-ToWorkflowBool $IncludeWeatherInSummary)",
@@ -100,6 +102,7 @@ $stateObject = [ordered]@{
     last_agency_index = $selectedIndex
     last_agency = $agencyName
     last_dispatch_at = (Get-Date).ToString("o")
+    trigger_source = $TriggerSource
     workflow = $Workflow
     repo = $Repo
 }
@@ -111,9 +114,10 @@ $logObject = [ordered]@{
     agency_index = $selectedIndex
     agency = $agencyName
     target_date = $TargetDate
+    trigger_source = $TriggerSource
     workflow = $Workflow
     repo = $Repo
 }
 Add-Content -LiteralPath $logPath -Value ($logObject | ConvertTo-Json -Compress) -Encoding UTF8
 
-Write-Host "Dispatch requested successfully: $agencyName (#$selectedIndex)"
+Write-Host "Dispatch requested successfully: $agencyName (#$selectedIndex), source=$TriggerSource"
