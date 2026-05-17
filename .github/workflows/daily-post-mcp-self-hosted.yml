@@ -8,8 +8,8 @@ on:
         required: false
         default: ""
   schedule:
-    # 08:07 KST. Avoid minute 0 because GitHub can delay or drop busy top-of-hour schedules.
-    - cron: "7 23 * * *"
+    # TEMP schedule test: every 5 minutes. Restore to "7 23 * * *" after confirming schedule events.
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -18,8 +18,12 @@ jobs:
   post:
     runs-on: [self-hosted, Windows, X64, kakao, qwerty]
     timeout-minutes: 20
+    concurrency:
+      group: daily-mma-news-kakao-post
+      cancel-in-progress: false
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
+      TARGET_DATE_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target_date || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,8 +57,8 @@ jobs:
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
         run: |
           $argsList = @("-m", "kakao_mma_news", "--dry-run")
-          if ("${{ inputs.target_date }}" -ne "") {
-            $argsList += @("--date", "${{ inputs.target_date }}")
+          if (![string]::IsNullOrWhiteSpace($env:TARGET_DATE_INPUT)) {
+            $argsList += @("--date", "$env:TARGET_DATE_INPUT")
           }
           & $env:PYTHON_EXE @argsList
 
