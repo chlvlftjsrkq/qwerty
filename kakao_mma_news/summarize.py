@@ -160,6 +160,25 @@ def _clean_excluded_note(value: object) -> str:
     return normalize_space(note)
 
 
+def _article_topic_key(title: str, summary: str) -> str:
+    compact = re.sub(r"\s+", "", f"{title} {summary}")
+    topic_rules = [
+        (("현역병", "모집"), "현역병모집"),
+        (("삼도동원훈련장",), "삼도동원훈련장"),
+        (("동원훈련장", "홍소영"), "병무청장동원훈련장"),
+        (("국외여행", "허가"), "국외여행허가"),
+        (("입영문화제",), "입영문화제"),
+        (("사회복무요원", "취업"), "사회복무요원취업"),
+        (("공공데이터", "경진대회"), "공공데이터경진대회"),
+        (("병역기피",), "병역기피"),
+        (("재복무",), "재복무"),
+    ]
+    for terms, key in topic_rules:
+        if all(term in compact for term in terms):
+            return key
+    return ""
+
+
 def _remove_ellipsis(value: str) -> str:
     return normalize_space(re.sub(r"(\.{2,}|…+)", " ", value))
 
@@ -224,6 +243,7 @@ def _render_codex_summary(
     ])
 
     rendered_items = 0
+    seen_topic_keys: set[str] = set()
     raw_items = data.get("items", [])
     if isinstance(raw_items, list):
         for item in raw_items[:8]:
@@ -236,6 +256,11 @@ def _render_codex_summary(
             url = _clean_text(item.get("url"), 500)
             if not title or not summary:
                 continue
+            topic_key = _article_topic_key(title, summary)
+            if topic_key and topic_key in seen_topic_keys:
+                continue
+            if topic_key:
+                seen_topic_keys.add(topic_key)
 
             rendered_items += 1
             number = (
@@ -323,6 +348,7 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
             f"Exclude or briefly down-rank articles that are weakly related to {agency_name}.",
+            "If several articles cover the same event, keep only one representative item.",
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
             "For each item summary, write one or two short polite spoken Korean sentences.",

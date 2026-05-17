@@ -7,6 +7,7 @@ from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms, strip_html
 from kakao_mma_news.summarize import (
     _load_json_object,
+    _article_topic_key,
     _prepend_weather_summary,
     _render_codex_summary,
     summarize_heuristic,
@@ -83,6 +84,57 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Source: example.com / https://example.com/news", summary)
         self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
         self.assertNotIn("말줄임표", summary)
+
+    def test_codex_render_dedupes_same_news_topic(self):
+        article = Article(
+            "현역병 모집",
+            "https://example.com/a",
+            "example.com",
+            datetime(2026, 4, 28, tzinfo=timezone.utc),
+            "현역병 모집 안내",
+            "test",
+        )
+        data = {
+            "items": [
+                {
+                    "title": "2026년 8월 입영 각 군 현역병 모집 접수",
+                    "summary": "대구경북지방병무청이 현역병 모집 접수를 알렸습니다.",
+                    "opinion": "지원 기간 안내 확인이 필요합니다.",
+                    "source": "a",
+                    "url": "https://example.com/a",
+                },
+                {
+                    "title": "대경 병무청, 8월 입영 현역병 모집 접수",
+                    "summary": "대구경북지방병무청이 현역병 모집을 안내했습니다.",
+                    "opinion": "접수 채널 확인이 필요합니다.",
+                    "source": "b",
+                    "url": "https://example.com/b",
+                },
+                {
+                    "title": "홍소영 병무청장, 삼도동원훈련장 방문",
+                    "summary": "홍소영 병무청장이 삼도동원훈련장을 방문했습니다.",
+                    "opinion": "현장 의견 반영을 확인해야 합니다.",
+                    "source": "c",
+                    "url": "https://example.com/c",
+                },
+            ],
+            "excluded_note": "",
+            "one_line": "현역병 모집과 현장 점검 소식입니다.",
+        }
+        summary = _render_codex_summary(article.published_date_kst, data, [article], "병무청")
+        self.assertIn("2026년 8월 입영 각 군 현역병 모집 접수", summary)
+        self.assertNotIn("대경 병무청, 8월 입영 현역병 모집 접수", summary)
+        self.assertIn("삼도동원훈련장 방문", summary)
+
+    def test_article_topic_key_for_known_duplicates(self):
+        self.assertEqual(
+            _article_topic_key("대경 병무청, 8월 입영 현역병 모집 접수", "현역병 모집 안내"),
+            "현역병모집",
+        )
+        self.assertEqual(
+            _article_topic_key("인도인접 현장", "홍소영 병무청장이 삼도동원훈련장을 방문했습니다."),
+            "삼도동원훈련장",
+        )
 
     def test_weather_summary_inserted_after_header(self):
         summary = _prepend_weather_summary(
