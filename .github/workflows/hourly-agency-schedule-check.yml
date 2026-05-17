@@ -1,12 +1,6 @@
 name: Hourly Agency Schedule Check
 
 on:
-  workflow_dispatch:
-    inputs:
-      kst_hour:
-        description: "Optional KST hour override, 0-23."
-        required: false
-        default: ""
   schedule:
     # Every hour at HH:07 KST. GitHub cron is UTC, so :07 UTC maps to :07 KST.
     - cron: "7 * * * *"
@@ -25,7 +19,7 @@ jobs:
         id: select
         shell: python
         env:
-          KST_HOUR_INPUT: ${{ github.event.inputs.kst_hour || '' }}
+          KST_HOUR_INPUT: ""
         run: |
           import json
           import os

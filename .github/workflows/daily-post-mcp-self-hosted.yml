@@ -1,12 +1,6 @@
 name: Daily MMA News Kakao Post via MCP
 
 on:
-  workflow_dispatch:
-    inputs:
-      target_date:
-        description: "Summary date in YYYY-MM-DD. Leave blank for yesterday in KST."
-        required: false
-        default: ""
   schedule:
     # Daily at 08:07 KST. GitHub cron uses UTC.
     - cron: "7 23 * * *"
@@ -23,7 +17,7 @@ jobs:
       cancel-in-progress: false
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
-      TARGET_DATE_INPUT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target_date || '' }}
+      TARGET_DATE_INPUT: ""
     steps:
       - uses: actions/checkout@v4
 
