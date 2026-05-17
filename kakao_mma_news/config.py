@@ -85,6 +85,7 @@ class Config:
     naver_client_id: str
     naver_client_secret: str
     naver_news_enabled: bool
+    naver_news_pages: int
     kskill_proxy_base_url: str
 
     query_terms: list[str]
@@ -154,6 +155,7 @@ def load_config(env_file: str | Path | None = ".env") -> Config:
         naver_client_id=os.getenv("NAVER_CLIENT_ID", ""),
         naver_client_secret=os.getenv("NAVER_CLIENT_SECRET", ""),
         naver_news_enabled=parse_bool(os.getenv("NAVER_NEWS_ENABLED"), True),
+        naver_news_pages=max(1, parse_int(os.getenv("NAVER_NEWS_PAGES"), 5)),
         kskill_proxy_base_url=os.getenv(
             "KSKILL_PROXY_BASE_URL", "https://k-skill-proxy.nomadamas.org"
         ).rstrip("/"),

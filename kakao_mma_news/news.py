@@ -237,7 +237,20 @@ def _naver_item_to_article(item: dict, origin: str) -> Article:
     )
 
 
-def _collect_naver_news_direct(config: Config) -> list[Article]:
+def _should_continue_date_paging(articles: list[Article], target_date: date | None) -> bool:
+    if not target_date or not articles:
+        return False
+    parsed_dates = [
+        article.published_date_kst
+        for article in articles
+        if article.published_date_kst is not None
+    ]
+    if not parsed_dates:
+        return True
+    return min(parsed_dates) >= target_date
+
+
+def _collect_naver_news_direct(config: Config, target_date: date | None = None) -> list[Article]:
     import requests
 
     endpoint = "https://openapi.naver.com/v1/search/news.json"
@@ -248,19 +261,25 @@ def _collect_naver_news_direct(config: Config) -> list[Article]:
     }
     articles: list[Article] = []
     for term in config.query_terms:
-        response = requests.get(
-            endpoint,
-            headers=headers,
-            params={"query": term, "display": min(config.max_items, 100), "sort": "date"},
-            timeout=config.request_timeout_seconds,
-        )
-        response.raise_for_status()
-        for item in response.json().get("items", []):
-            articles.append(_naver_item_to_article(item, "naver_news"))
+        for page in range(config.naver_news_pages):
+            response = requests.get(
+                endpoint,
+                headers=headers,
+                params={"query": term, "display": 100, "start": page * 100 + 1, "sort": "date"},
+                timeout=config.request_timeout_seconds,
+            )
+            response.raise_for_status()
+            page_articles = [
+                _naver_item_to_article(item, "naver_news")
+                for item in response.json().get("items", [])
+            ]
+            articles.extend(page_articles)
+            if not _should_continue_date_paging(page_articles, target_date):
+                break
     return articles
 
 
-def _collect_naver_news_proxy(config: Config) -> list[Article]:
+def _collect_naver_news_proxy(config: Config, target_date: date | None = None) -> list[Article]:
     import requests
 
     endpoint = f"{config.kskill_proxy_base_url}/v1/naver-news/search"
@@ -268,18 +287,24 @@ def _collect_naver_news_proxy(config: Config) -> list[Article]:
     for term in config.query_terms:
         if len(term.strip()) < 2:
             continue
-        response = requests.get(
-            endpoint,
-            params={"q": term, "display": min(config.max_items, 100), "sort": "date"},
-            timeout=config.request_timeout_seconds,
-        )
-        response.raise_for_status()
-        for item in response.json().get("items", []):
-            articles.append(_naver_item_to_article(item, "naver_news_proxy"))
+        for page in range(config.naver_news_pages):
+            response = requests.get(
+                endpoint,
+                params={"q": term, "display": 100, "start": page * 100 + 1, "sort": "date"},
+                timeout=config.request_timeout_seconds,
+            )
+            response.raise_for_status()
+            page_articles = [
+                _naver_item_to_article(item, "naver_news_proxy")
+                for item in response.json().get("items", [])
+            ]
+            articles.extend(page_articles)
+            if not _should_continue_date_paging(page_articles, target_date):
+                break
     return articles
 
 
-def collect_naver_news(config: Config) -> list[Article]:
+def collect_naver_news(config: Config, target_date: date | None = None) -> list[Article]:
     if not config.naver_news_enabled:
         return []
     try:
@@ -288,8 +313,8 @@ def collect_naver_news(config: Config) -> list[Article]:
         raise RuntimeError("requests가 설치되어 있지 않습니다. requirements.txt를 설치하세요.") from exc
 
     if config.naver_client_id and config.naver_client_secret:
-        return _collect_naver_news_direct(config)
-    return _collect_naver_news_proxy(config)
+        return _collect_naver_news_direct(config, target_date)
+    return _collect_naver_news_proxy(config, target_date)
 
 
 def fetch_article_text(url: str, timeout: float) -> str:
@@ -327,11 +352,21 @@ def fetch_article_text(url: str, timeout: float) -> str:
 def collect_articles(config: Config, target_date: date) -> list[Article]:
     articles = []
     errors: list[str] = []
-    for collector in (collect_naver_news, collect_policy_rss, collect_google_news):
+
+    if config.naver_news_enabled:
+        try:
+            articles.extend(collect_naver_news(config, target_date))
+        except Exception as exc:
+            errors.append(f"collect_naver_news: {exc}")
+
+    for collector in (collect_policy_rss, collect_google_news):
         try:
             articles.extend(collector(config))
         except Exception as exc:
             errors.append(f"{collector.__name__}: {exc}")
+
+    if errors and not articles:
+        raise RuntimeError("뉴스 수집 실패: " + "; ".join(errors))
 
     filtered: list[Article] = []
     for article in dedupe_articles(articles):
