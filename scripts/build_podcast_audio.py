@@ -24,6 +24,35 @@ NUMBER_WORDS = {
     "10": "열 번째",
 }
 
+LETTER_READINGS = {
+    "A": "에이",
+    "B": "비",
+    "C": "씨",
+    "D": "디",
+    "E": "이",
+    "F": "에프",
+    "G": "지",
+    "H": "에이치",
+    "I": "아이",
+    "J": "제이",
+    "K": "케이",
+    "L": "엘",
+    "M": "엠",
+    "N": "엔",
+    "O": "오",
+    "P": "피",
+    "Q": "큐",
+    "R": "알",
+    "S": "에스",
+    "T": "티",
+    "U": "유",
+    "V": "브이",
+    "W": "더블유",
+    "X": "엑스",
+    "Y": "와이",
+    "Z": "제트",
+}
+
 EMOJI_PATTERN = re.compile(
     "["
     "\U0001f300-\U0001f5ff"
@@ -85,10 +114,86 @@ def clean_for_speech(line: str) -> str:
     line = line.replace("🎯", "")
     line = EMOJI_PATTERN.sub("", line)
     line = line.replace("·", ", ")
-    line = line.replace("AI", "에이아이")
-    line = line.replace("MCP", "엠씨피")
-    line = line.replace("URL", "유알엘")
+    line = re.sub(r"[◆◇■□▪▫●○]", " ", line)
     return normalize_space(line)
+
+
+def format_spoken_date(value: str) -> str:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return value
+    return f"{parsed.year} 년 {parsed.month} 월 {parsed.day} 일"
+
+
+def _spell_letters(value: str) -> str:
+    return " ".join(LETTER_READINGS.get(letter, letter) for letter in value)
+
+
+def normalize_symbols_for_tts(text: str) -> str:
+    text = re.sub(
+        r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b",
+        lambda match: f"{int(match.group(1))} 년 {int(match.group(2))} 월 {int(match.group(3))} 일",
+        text,
+    )
+    text = re.sub(r"([A-Z]{2,})", lambda match: _spell_letters(match.group(1)), text)
+    text = re.sub(r"(?<=\d)([A-Z])", lambda match: " " + _spell_letters(match.group(1)), text)
+    text = re.sub(r"(\d+)\s*%", r"\1 퍼센트", text)
+    text = re.sub(r"(\d+)\s*명", r"\1 명", text)
+    text = re.sub(r"(\d+)\s*건", r"\1 건", text)
+    text = re.sub(r"(\d+)\s*회", r"\1 회", text)
+    text = re.sub(r"(\d+)\s*차", r"\1 차", text)
+    text = re.sub(r"(\d+)\s*년", r"\1 년", text)
+    text = re.sub(r"(\d+)\s*월", r"\1 월", text)
+    text = re.sub(r"(\d+)\s*일", r"\1 일", text)
+    text = re.sub(r"(\d+)\s*도", r"\1 도", text)
+    text = re.sub(r"(?<=[가-힣])(\d)", r" \1", text)
+    return normalize_space(text)
+
+
+def polish_korean_sentence(text: str) -> str:
+    text = normalize_symbols_for_tts(remove_ellipsis(text).rstrip(" ,.!?。"))
+    replacements = [
+        (r"하였다$", "하였습니다"),
+        (r"했다$", "했습니다"),
+        (r"한다$", "합니다"),
+        (r"됐다$", "됐습니다"),
+        (r"되었다$", "되었습니다"),
+        (r"이다$", "입니다"),
+        (r"있다$", "있습니다"),
+        (r"없다$", "없습니다"),
+        (r"열었다$", "열었습니다"),
+        (r"밝혔다$", "밝혔습니다"),
+        (r"전했다$", "전했습니다"),
+        (r"나왔다$", "나왔습니다"),
+        (r"시작된다$", "시작됩니다"),
+        (r"진행된다$", "진행됩니다"),
+        (r"운영된다$", "운영됩니다"),
+        (r"추진된다$", "추진됩니다"),
+        (r"확대된다$", "확대됩니다"),
+    ]
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text)
+    if not text:
+        return ""
+    if text.endswith("위해"):
+        return text + " 마련된 내용입니다."
+    if text.endswith("위한"):
+        return text + " 내용입니다."
+    if re.search(r"(다|요|죠|니다|습니다|됩니다|합니다|했습니다)$", text):
+        return text + "."
+    return text + "입니다."
+
+
+def polish_korean_text(text: str) -> str:
+    sentences = split_sentences(text)
+    if not sentences:
+        return polish_korean_sentence(text)
+    return " ".join(
+        sentence
+        for sentence in (polish_korean_sentence(item) for item in sentences)
+        if sentence
+    )
 
 
 def split_sentences(text: str) -> list[str]:
@@ -100,14 +205,14 @@ def split_sentences(text: str) -> list[str]:
 
 
 def trim_text(text: str, limit: int) -> str:
-    text = remove_ellipsis(text)
+    text = normalize_symbols_for_tts(remove_ellipsis(text))
     if len(text) <= limit:
         return text
     return text[:limit].rstrip(" .,")
 
 
 def ensure_clear_ending(text: str) -> str:
-    text = remove_ellipsis(text).rstrip(" ,")
+    text = normalize_symbols_for_tts(remove_ellipsis(text).rstrip(" ,"))
     if not text:
         return ""
     if text[-1] in ".!?。":
@@ -118,12 +223,21 @@ def ensure_clear_ending(text: str) -> str:
 
 
 def ensure_title_ending(text: str) -> str:
-    text = remove_ellipsis(text).rstrip(" ,")
+    text = normalize_symbols_for_tts(remove_ellipsis(text).rstrip(" ,"))
     if not text:
         return ""
     if text[-1] in ".!?。":
         return text
     return text + "."
+
+
+def spoken_title(title: str) -> str:
+    title = normalize_symbols_for_tts(remove_ellipsis(title).rstrip(" ,.!?。"))
+    title = re.sub(r"\((\d+)\)", r"\1 번째", title)
+    title = re.sub(r"[\[\]\"'“”‘’]", "", title)
+    if not title:
+        return ""
+    return f"제목은 {title}입니다."
 
 
 def extract_weather(summary: str) -> str:
@@ -170,9 +284,11 @@ def extract_articles(summary: str) -> list[dict[str, str]]:
             current = {"number": digit, "title": title, "body": []}
             continue
 
+        if line.startswith("오늘 한 줄 요약"):
+            break
         if not current:
             continue
-        if line.startswith("Opinion:") or line.startswith("오늘 한 줄 요약"):
+        if line.startswith("Opinion:"):
             continue
         if line.startswith("#"):
             continue
@@ -204,7 +320,7 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
             continue
         candidate = (
             f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. "
-            f"{ensure_title_ending(title)} 주요 내용은 {ensure_clear_ending(body)}"
+            f"{spoken_title(title)} 주요 내용은 {polish_korean_text(body)}"
         )
         projected = len("\n".join([*lines, candidate]))
         if lines and projected > max_chars:
@@ -223,7 +339,7 @@ def markdown_to_speech(
     agency_name = extract_agency_name(summary)
     articles = extract_articles(summary)
     max_chars = max(700, int(target_minutes * 900))
-    intro = f"{target_date} {agency_name} 뉴스 음성 브리핑입니다."
+    intro = f"{format_spoken_date(target_date)} {agency_name} 뉴스 음성 브리핑입니다."
     if not articles:
         lines = [intro]
         if weather:
@@ -231,7 +347,7 @@ def markdown_to_speech(
         lines.append(f"네이버 뉴스 기준으로 공유할 만한 {agency_name} 관련 주요 기사가 많지 않았습니다.")
         return "\n".join(lines)
 
-    opening = f"오늘은 주요 기사 {len(articles)}건을 제목과 핵심 내용 중심으로 전해드리겠습니다."
+    opening = f"오늘은 주요 기사 {len(articles)} 건을 제목과 핵심 내용 중심으로 전해드리겠습니다."
     lines = build_compact_lines(articles, max_chars=max_chars - len(intro) - len(opening) - 40)
     if len(lines) < len(articles):
         lines.append("나머지 기사는 중복이거나 관련성이 낮아 음성 요약에서는 줄였습니다.")

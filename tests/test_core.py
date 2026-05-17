@@ -135,17 +135,27 @@ class CoreTests(unittest.TestCase):
     def test_podcast_speech_cleans_markdown(self):
         speech = markdown_to_speech(
             "🌤️ 오늘 서울은 맑고 최고 25도입니다.\n"
-            "# 1️⃣ 병무청 공공데이터 기사\n"
-            "병무청이 공공데이터 행사를 열었다. 🎯\n"
+            "# 1️⃣ 병무청 AI·5G 공공데이터 2026-05-16 기사\n"
+            "병무청이 공공데이터 행사를 열었다. AI 활용 계획은 5건이다. 🎯\n"
             "Opinion: 공식 안내 확인이 필요하다.\n"
-            "Source: example.com / https://example.com/news\n",
+            "Source: example.com / https://example.com/news\n"
+            "---\n"
+            "오늘 한 줄 요약 🎯\n"
+            "이 문장은 음성 기사 내용에 들어가면 안 된다.\n",
             "2026-05-16",
             include_weather=True,
         )
-        self.assertIn("오늘 서울은 맑고 최고 25도입니다.", speech)
-        self.assertIn("첫 번째 소식입니다. 병무청 공공데이터 기사.", speech)
-        self.assertIn("주요 내용은 병무청이 공공데이터 행사를 열었다", speech)
+        self.assertIn("오늘 서울은 맑고 최고 25 도입니다.", speech)
+        self.assertIn("2026 년 5 월 16 일 기관 뉴스 음성 브리핑입니다.", speech)
+        self.assertIn("오늘은 주요 기사 1 건을 제목과 핵심 내용 중심으로 전해드리겠습니다.", speech)
+        self.assertIn(
+            "첫 번째 소식입니다. 제목은 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사입니다.",
+            speech,
+        )
+        self.assertIn("주요 내용은 병무청이 공공데이터 행사를 열었습니다.", speech)
+        self.assertIn("에이 아이 활용 계획은 5 건입니다.", speech)
         self.assertNotIn("공식 안내 확인이 필요하다", speech)
+        self.assertNotIn("들어가면 안 된다", speech)
         self.assertNotIn("Source:", speech)
         self.assertNotIn("️⃣", speech)
         self.assertNotIn("...", speech)
