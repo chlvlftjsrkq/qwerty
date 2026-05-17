@@ -48,7 +48,14 @@ def strip_html(value: str | None) -> str:
 
 
 def normalize_space(value: str) -> str:
-    return re.sub(r"\s+", " ", value or "").strip()
+    text = re.sub(r"\s+", " ", value or "").strip()
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"([\[\(（])\s+", r"\1", text)
+    text = re.sub(r"\s+([\]\)）])", r"\1", text)
+    text = re.sub(r"\]\s*([^\s\]\),.;:!?])", r"] \1", text)
+    text = re.sub(r"([가-힣]{1,12}지방)\s+병무청", r"\1병무청", text)
+    text = re.sub(r"병무청\s+장", "병무청장", text)
+    return text
 
 
 def canonical_url(url: str) -> str:

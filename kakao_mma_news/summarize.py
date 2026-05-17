@@ -144,6 +144,14 @@ def _clean_text(value: object, limit: int = 0) -> str:
     return text
 
 
+def _clean_title(value: object) -> str:
+    title = _clean_text(value)
+    title = re.sub(r"\]\s*([^\s\]\),.;:!?])", r"] \1", title)
+    title = re.sub(r"([가-힣]{1,12}지방)\s+병무청", r"\1병무청", title)
+    title = re.sub(r"병무청\s+장", "병무청장", title)
+    return normalize_space(title)
+
+
 def _remove_ellipsis(value: str) -> str:
     return normalize_space(re.sub(r"(\.{2,}|…+)", " ", value))
 
@@ -213,7 +221,7 @@ def _render_codex_summary(
         for item in raw_items[:8]:
             if not isinstance(item, dict):
                 continue
-            title = _clean_text(item.get("title"))
+            title = _clean_title(item.get("title"))
             summary = _clean_text(item.get("summary"), 360)
             opinion = _clean_text(item.get("opinion"), 260)
             source = _clean_text(item.get("source"), 80) or "네이버 뉴스"
@@ -453,7 +461,7 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
         summary = _trim_sentence(article.summary or article.title)
         lines.extend(
             [
-                f"# {number} {article.title}",
+                f"# {number} {_clean_title(article.title)}",
                 f"{summary} 🎯",
                 f"Opinion: {_article_opinion(article, agency_name)}",
                 f"Source: {article.source or '네이버 뉴스'} / {article.url}",

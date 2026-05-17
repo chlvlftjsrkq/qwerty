@@ -114,9 +114,11 @@ def remove_ellipsis(value: str) -> str:
 def clean_for_speech(line: str) -> str:
     line = re.sub(r"https?://\S+", "", line)
     line = remove_ellipsis(line)
+    line = re.sub(r"\[([^\]]+)\]\s*", r"\1, ", line)
     line = line.replace("🎯", "")
     line = EMOJI_PATTERN.sub("", line)
     line = line.replace("·", ", ")
+    line = line.replace("&", " 앤 ")
     line = re.sub(r"[◆◇■□▪▫●○]", " ", line)
     return normalize_space(line)
 
@@ -146,10 +148,22 @@ def normalize_symbols_for_tts(text: str) -> str:
     text = re.sub(r"(\d+)\s*건", r"\1 건", text)
     text = re.sub(r"(\d+)\s*회", r"\1 회", text)
     text = re.sub(r"(\d+)\s*차", r"\1 차", text)
+    text = re.sub(r"(\d+)\s*개월", r"\1 개월", text)
+    text = re.sub(r"(\d+)\s*세", r"\1 세", text)
+    text = re.sub(r"(\d+)\s*시", r"\1 시", text)
+    text = re.sub(r"(\d+)\s*분", r"\1 분", text)
+    text = re.sub(r"(\d+)\s*초", r"\1 초", text)
+    text = re.sub(r"(\d+)\s*기", r"\1 기", text)
     text = re.sub(r"(\d+)\s*년", r"\1 년", text)
     text = re.sub(r"(\d+)\s*월", r"\1 월", text)
     text = re.sub(r"(\d+)\s*일", r"\1 일", text)
     text = re.sub(r"(\d+)\s*도", r"\1 도", text)
+    text = re.sub(r"(\d+\s*개월)서", r"\1에서", text)
+    text = text.replace("허가기간", "허가 기간")
+    text = text.replace("국외여행허가", "국외여행 허가")
+    text = text.replace("안전수칙교육", "안전 수칙 교육")
+    text = text.replace("병무청 장", "병무청장")
+    text = re.sub(r"([가-힣]{1,12}지방)\s+병무청", r"\1병무청", text)
     text = re.sub(r"(?<=[가-힣])(\d)", r" \1", text)
     return normalize_space(text)
 
@@ -347,14 +361,14 @@ def markdown_to_speech(
         lines = [intro]
         if weather:
             lines.append(weather)
-        lines.append(f"네이버 뉴스 기준으로 공유할 만한 {agency_name} 관련 주요 기사가 많지 않았습니다.")
+        lines.append(f"네이버 뉴스 기준으로 공유할 만한 {agency_name} 관련 주요 기사가 확인되지 않았습니다.")
         return "\n".join(lines)
 
     opening = f"오늘은 주요 기사 {len(articles)} 건을 제목과 핵심 내용 중심으로 전해드리겠습니다."
     lines = build_compact_lines(articles, max_chars=max_chars - len(intro) - len(opening) - 40)
     if len(lines) < len(articles):
         lines.append("나머지 기사는 중복이거나 관련성이 낮아 음성 요약에서는 줄였습니다.")
-    closing = f"자세한 신청 조건과 일정은 원문 기사와 {agency_name} 공식 안내를 함께 확인하시기 바랍니다."
+    closing = f"자세한 내용과 개인별 적용 조건은 원문 기사와 {agency_name} 공식 안내를 함께 확인하시기 바랍니다."
     output = [intro]
     if weather:
         output.append(weather)

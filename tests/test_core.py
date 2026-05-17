@@ -18,6 +18,10 @@ from scripts.build_podcast_audio import markdown_to_speech
 class CoreTests(unittest.TestCase):
     def test_strip_html(self):
         self.assertEqual(strip_html("<b>병무청</b>&nbsp;뉴스<br>요약"), "병무청 뉴스 요약")
+        self.assertEqual(
+            strip_html("[김종석의 리포트]검찰, 대구경북지방 <b>병무청</b> , 병무청 장 방문"),
+            "[김종석의 리포트] 검찰, 대구경북지방병무청, 병무청장 방문",
+        )
 
     def test_dedupe_by_title(self):
         articles = [
@@ -160,6 +164,38 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("️⃣", speech)
         self.assertNotIn("...", speech)
         self.assertNotIn("…", speech)
+
+    def test_podcast_speech_polishes_sample_title_and_units(self):
+        speech = markdown_to_speech(
+            "🪖 2026-04-21 병무청 뉴스 브리핑\n"
+            "# 1️⃣ [김종석의 리포트]검찰, 송민호에 징역 1년 6개월 구형\n"
+            "검찰이 송민호 씨에게 징역 1년 6개월을 구형했습니다.\n"
+            "# 2️⃣ 대구경북지방 병무청 , 25세 이상 병역의무자, 국외여행허가 받아야\n"
+            "단기 국외여행 허가기간이 최대 6개월서 1개월 이내로 단축됩니다. 오후 2시 안내입니다.\n"
+            "# 3️⃣ 홍소영 병무청 장, 해병대 신병 1329기 입영문화제 이슈&톡\n"
+            "홍소영 병무청 장이 현장을 방문했습니다.\n",
+            "2026-04-21",
+        )
+        self.assertIn("김종석의 리포트, 검찰", speech)
+        self.assertIn("1 년 6 개월", speech)
+        self.assertIn("대구경북지방병무청", speech)
+        self.assertIn("25 세", speech)
+        self.assertIn("국외여행 허가", speech)
+        self.assertIn("허가 기간", speech)
+        self.assertIn("6 개월에서 1 개월", speech)
+        self.assertIn("오후 2 시", speech)
+        self.assertIn("병무청장", speech)
+        self.assertIn("1329 기", speech)
+        self.assertIn("이슈 앤 톡", speech)
+        self.assertIn("자세한 내용과 개인별 적용 조건", speech)
+
+    def test_podcast_no_article_message_is_exact(self):
+        speech = markdown_to_speech(
+            "🪖 2026-03-31 병무청 뉴스 브리핑\n확인된 주요 뉴스가 없습니다.",
+            "2026-03-31",
+        )
+        self.assertIn("주요 기사가 확인되지 않았습니다.", speech)
+        self.assertNotIn("많지 않았습니다", speech)
 
 
 if __name__ == "__main__":
