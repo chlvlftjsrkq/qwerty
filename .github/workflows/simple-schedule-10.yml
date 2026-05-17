@@ -1,0 +1,113 @@
+name: Simple Schedule 10
+
+on:
+  schedule:
+    # Every 5 minutes, offset from the busiest :00/:05 boundaries.
+    - cron: "6,11,16,21,26,31,36,41,46,51,56 * * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: simple-schedule-10
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record one scheduled result
+        id: record
+        shell: python
+        run: |
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          out_dir = Path("runs/simple-schedule-10")
+          out_dir.mkdir(parents=True, exist_ok=True)
+          state_path = out_dir / "state.json"
+          results_path = out_dir / "results.jsonl"
+
+          if state_path.exists():
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+          else:
+            state = {"count": 0, "runs": []}
+
+          count = int(state.get("count", 0))
+          if count >= 10:
+            print("Already recorded 10 scheduled runs.")
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("new_count=10\n")
+            raise SystemExit(0)
+
+          now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+          new_count = count + 1
+          record = {
+            "number": new_count,
+            "recorded_at_utc": now,
+            "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+            "workflow": os.environ.get("GITHUB_WORKFLOW"),
+            "run_id": os.environ.get("GITHUB_RUN_ID"),
+            "run_number": os.environ.get("GITHUB_RUN_NUMBER"),
+            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+            "ref_name": os.environ.get("GITHUB_REF_NAME"),
+            "sha": os.environ.get("GITHUB_SHA"),
+            "run_url": f"{os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}",
+          }
+
+          with results_path.open("a", encoding="utf-8") as results:
+            results.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+          state["count"] = new_count
+          state.setdefault("runs", []).append(record)
+          state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          print(json.dumps(record, ensure_ascii=False, indent=2))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"new_count={new_count}\n")
+
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f runs/simple-schedule-10/
+
+          if git diff --cached --quiet; then
+            echo "No simple schedule result changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Record simple schedule result ${{ steps.record.outputs.new_count }}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Disable workflow after 10 results
+        if: ${{ steps.record.outputs.new_count == '10' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method PUT \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/simple-schedule-10.yml/disable"
+
+      - name: Write step summary
+        shell: bash
+        run: |
+          {
+            echo "### Simple schedule 10"
+            echo ""
+            echo "- Recorded count: ${{ steps.record.outputs.new_count }}"
+            echo "- Event: ${GITHUB_EVENT_NAME}"
+            echo "- Result file: runs/simple-schedule-10/results.jsonl"
+          } >> "${GITHUB_STEP_SUMMARY}"
