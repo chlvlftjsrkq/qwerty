@@ -58,6 +58,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("# 1️⃣ 서울지방병무청 행사", summary)
         self.assertIn("Opinion:", summary)
         self.assertIn("오늘 한 줄 요약", summary)
+        self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
 
     def test_codex_json_render_format(self):
         article = Article(
@@ -76,6 +77,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("# 1️⃣ 전북지방병무청 경진대회", summary)
         self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
         self.assertIn("Source: example.com / https://example.com/news", summary)
+        self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
 
     def test_weather_summary_inserted_after_header(self):
         summary = _prepend_weather_summary(

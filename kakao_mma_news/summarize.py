@@ -81,8 +81,6 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
         "target_date": target_date.isoformat(),
         "format": (
             f"🪖 YYYY-MM-DD {agency_name} 뉴스 브리핑\n"
-            f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식을 정리했어요. "
-            f"개별 신청·접수 조건은 원문과 {agency_name} 공식 안내를 함께 확인해 주세요.\n\n"
             "---\n\n"
             f"오늘의 {agency_name} 뉴스 톡 📡\n"
             "# 1️⃣ 기사 제목\n"
@@ -204,8 +202,6 @@ def _render_codex_summary(
     if weather_summary:
         lines.extend([weather_summary, ""])
     lines.extend([
-        f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식을 정리했습니다. 개별 신청과 접수 조건은 원문과 {agency_name} 공식 안내를 함께 확인해 주세요.",
-        "",
         "---",
         "",
         f"오늘의 {agency_name} 뉴스 톡 📡",
@@ -426,28 +422,27 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
     agency_name = config.agency_name
     header = f"🪖 {target_date.isoformat()} {agency_name} 뉴스 브리핑"
     if not articles:
-        lines = [header]
-        lines.extend(
-            [
-            f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식이 많지 않았어요. "
-            f"급한 신청·접수 일정은 {agency_name} 공식 안내를 한 번 더 확인해 주세요.\n\n"
-            "---\n\n"
-            f"오늘의 {agency_name} 뉴스 톡 📡\n"
-            "확인된 주요 뉴스가 없습니다.\n\n"
-            "---\n\n"
-            "오늘 한 줄 요약 🎯\n"
-            f"오늘은 공유할 만한 {agency_name} 직접 관련 뉴스가 확인되지 않았습니다.\n\n"
-            "---\n\n"
-            "💡 필요하면 검색어를 넓히거나 Google News·정책브리핑 RSS 보조 출처를 켜서 다시 확인할 수 있어요."
-            ]
-        )
+        lines = [
+            header,
+            "---",
+            "",
+            f"오늘의 {agency_name} 뉴스 톡 📡",
+            "확인된 주요 뉴스가 없습니다.",
+            "",
+            "---",
+            "",
+            "오늘 한 줄 요약 🎯",
+            f"오늘은 공유할 만한 {agency_name} 직접 관련 뉴스가 확인되지 않았습니다.",
+            "",
+            "---",
+            "",
+            "💡 필요하면 검색어를 넓히거나 Google News·정책브리핑 RSS 보조 출처를 켜서 다시 확인할 수 있어요.",
+        ]
         return "\n".join(lines)
 
     top = articles[:8]
     lines = [
         header,
-        f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식 {len(articles)}건을 정리했어요. 신청·접수 조건은 원문과 {agency_name} 공식 안내를 함께 확인해 주세요.",
-        "",
         "---",
         "",
         f"오늘의 {agency_name} 뉴스 톡 📡",
