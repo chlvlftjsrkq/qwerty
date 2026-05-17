@@ -152,6 +152,14 @@ def _clean_title(value: object) -> str:
     return normalize_space(title)
 
 
+def _clean_excluded_note(value: object) -> str:
+    note = _clean_text(value, 220)
+    if "말줄임표" in note:
+        note = re.sub(r"말줄임표[^,，]*[,，]\s*", "", note)
+        note = re.sub(r"말줄임표[^ ]*\s*", "", note)
+    return normalize_space(note)
+
+
 def _remove_ellipsis(value: str) -> str:
     return normalize_space(re.sub(r"(\.{2,}|…+)", " ", value))
 
@@ -256,7 +264,7 @@ def _render_codex_summary(
     if rendered_items == 0:
         lines.extend(["확인된 주요 뉴스가 없습니다.", ""])
 
-    excluded_note = _clean_text(data.get("excluded_note"), 220)
+    excluded_note = _clean_excluded_note(data.get("excluded_note"))
     if excluded_note:
         lines.extend([excluded_note, ""])
 
@@ -318,6 +326,7 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
             "For each item summary, write one or two short polite spoken Korean sentences.",
+            "Do not mention ellipses, title-shortening marks, JSON, or formatting rules in excluded_note.",
             f'Required JSON schema: {{"items":[{{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
             "items는 최대 8개만 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]

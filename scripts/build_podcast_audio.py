@@ -163,6 +163,7 @@ def normalize_symbols_for_tts(text: str) -> str:
     text = text.replace("국외여행허가", "국외여행 허가")
     text = text.replace("안전수칙교육", "안전 수칙 교육")
     text = text.replace("병무청 장", "병무청장")
+    text = text.replace("육, 해, 공군", "육군, 해군, 공군")
     text = re.sub(r"([가-힣]{1,12}지방)\s+병무청", r"\1병무청", text)
     text = re.sub(r"(?<=[가-힣])(\d)", r" \1", text)
     return normalize_space(text)
@@ -337,7 +338,7 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
             continue
         candidate = (
             f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. "
-            f"{spoken_title(title)} 주요 내용은 {polish_korean_text(body)}"
+            f"{spoken_title(title)} 주요 내용입니다. {polish_korean_text(body)}"
         )
         projected = len("\n".join([*lines, candidate]))
         if lines and projected > max_chars:

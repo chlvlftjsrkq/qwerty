@@ -74,14 +74,15 @@ class CoreTests(unittest.TestCase):
             "test",
         )
         data = _load_json_object(
-            '```json\n{"items":[{"title":"전북지방병무청 경진대회","summary":"업무 인수인계 개선을 위한 행사다.","opinion":"행정 품질 개선 효과를 확인할 필요가 있다.","source":"example.com","url":"https://example.com/news"}],"excluded_note":"","one_line":"지방병무청 업무 개선 소식이 중심이었다."}\n```'
+            '```json\n{"items":[{"title":"전북지방 병무청 , 경진대회","summary":"업무 인수인계 개선을 위한 행사다.","opinion":"행정 품질 개선 효과를 확인할 필요가 있다.","source":"example.com","url":"https://example.com/news"}],"excluded_note":"말줄임표가 포함되었거나 중복된 항목은 제외했습니다.","one_line":"지방병무청 업무 개선 소식이 중심이었다."}\n```'
         )
         summary = _render_codex_summary(article.published_date_kst, data, [article], "병무청")
         self.assertIn("🪖 2026-05-15 병무청 뉴스 브리핑", summary)
-        self.assertIn("# 1️⃣ 전북지방병무청 경진대회", summary)
+        self.assertIn("# 1️⃣ 전북지방병무청, 경진대회", summary)
         self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
         self.assertIn("Source: example.com / https://example.com/news", summary)
         self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
+        self.assertNotIn("말줄임표", summary)
 
     def test_weather_summary_inserted_after_header(self):
         summary = _prepend_weather_summary(
@@ -156,7 +157,7 @@ class CoreTests(unittest.TestCase):
             "첫 번째 소식입니다. 제목은 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사입니다.",
             speech,
         )
-        self.assertIn("주요 내용은 병무청이 공공데이터 행사를 열었습니다.", speech)
+        self.assertIn("주요 내용입니다. 병무청이 공공데이터 행사를 열었습니다.", speech)
         self.assertIn("에이 아이 활용 계획은 5 건입니다.", speech)
         self.assertNotIn("공식 안내 확인이 필요하다", speech)
         self.assertNotIn("들어가면 안 된다", speech)
@@ -187,6 +188,8 @@ class CoreTests(unittest.TestCase):
         self.assertIn("병무청장", speech)
         self.assertIn("1329 기", speech)
         self.assertIn("이슈 앤 톡", speech)
+        self.assertIn("주요 내용입니다.", speech)
+        self.assertNotIn("주요 내용은 대구경북지방병무청은", speech)
         self.assertIn("자세한 내용과 개인별 적용 조건", speech)
 
     def test_podcast_no_article_message_is_exact(self):
