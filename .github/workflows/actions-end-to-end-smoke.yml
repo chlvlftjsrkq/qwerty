@@ -1,0 +1,43 @@
+name: Actions End-to-End Smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/actions-end-to-end-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  github-hosted:
+    name: GitHub-hosted runner smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Print GitHub-hosted context
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "workflow=${GITHUB_WORKFLOW}"
+          echo "ref=${GITHUB_REF_NAME}"
+          echo "sha=${GITHUB_SHA}"
+          date -u +"utc=%Y-%m-%dT%H:%M:%SZ"
+
+  self-hosted:
+    name: Self-hosted runner smoke
+    runs-on: [self-hosted, Windows, X64, kakao, qwerty]
+    timeout-minutes: 5
+    steps:
+      - name: Print self-hosted context
+        shell: powershell
+        run: |
+          Write-Host "event=$env:GITHUB_EVENT_NAME"
+          Write-Host "workflow=$env:GITHUB_WORKFLOW"
+          Write-Host "ref=$env:GITHUB_REF_NAME"
+          Write-Host "sha=$env:GITHUB_SHA"
+          Write-Host "runner=$env:RUNNER_NAME"
+          Write-Host "machine=$env:COMPUTERNAME"
+          Get-Date -Format "yyyy-MM-dd HH:mm:ss K"
