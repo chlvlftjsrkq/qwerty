@@ -1,0 +1,85 @@
+name: Schedule Only Smoke Test
+
+on:
+  schedule:
+    # Temporary schedule-only test. Offset minutes avoid GitHub's busiest boundaries.
+    - cron: "37/5 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: schedule-only-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stop after the first confirmed scheduled run
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f runs/schedule-only-smoke/schedule-confirmed.json ]]; then
+            echo "Schedule-only smoke test is already confirmed."
+            exit 0
+          fi
+
+      - name: Record schedule-only smoke result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p runs/schedule-only-smoke
+          now_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          stamp="$(date -u +'%Y%m%d-%H%M%S')"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          cat > "runs/schedule-only-smoke/schedule-confirmed.json" <<JSON
+          {
+            "ok": true,
+            "workflow": "${GITHUB_WORKFLOW}",
+            "event_name": "${GITHUB_EVENT_NAME}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_number": "${GITHUB_RUN_NUMBER}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "ref_name": "${GITHUB_REF_NAME}",
+            "sha": "${GITHUB_SHA}",
+            "recorded_at_utc": "${now_utc}",
+            "run_url": "${run_url}"
+          }
+          JSON
+
+          cp "runs/schedule-only-smoke/schedule-confirmed.json" "runs/schedule-only-smoke/${stamp}-${GITHUB_EVENT_NAME}.json"
+
+      - name: Commit schedule-only smoke result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f runs/schedule-only-smoke/
+
+          if git diff --cached --quiet; then
+            echo "No schedule-only smoke changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Confirm schedule-only smoke test ${GITHUB_RUN_ID}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Write step summary
+        shell: bash
+        run: |
+          {
+            echo "### Schedule-only smoke test"
+            echo ""
+            echo "- Event: ${GITHUB_EVENT_NAME}"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- Result file: runs/schedule-only-smoke/schedule-confirmed.json"
+          } >> "${GITHUB_STEP_SUMMARY}"
