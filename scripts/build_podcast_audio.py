@@ -115,6 +115,7 @@ def clean_for_speech(line: str) -> str:
     line = re.sub(r"https?://\S+", "", line)
     line = remove_ellipsis(line)
     line = re.sub(r"\[([^\]]+)\]\s*", r"\1, ", line)
+    line = line.replace("대구·경북지방병무청", "대구경북지방병무청")
     line = line.replace("🎯", "")
     line = EMOJI_PATTERN.sub("", line)
     line = line.replace("·", ", ")
