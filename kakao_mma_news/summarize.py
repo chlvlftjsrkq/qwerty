@@ -68,24 +68,26 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
     except ImportError as exc:
         raise RuntimeError("requests가 설치되어 있지 않습니다. requirements.txt를 설치하세요.") from exc
 
+    agency_name = config.agency_name
+    policy_perspective = "병무행정" if agency_name == "병무청" else f"{agency_name} 정책"
     system_prompt = (
-        "너는 한국 병무/국방 행정 뉴스를 매일 카카오톡 단톡방에 공유하는 편집자다. "
+        f"너는 한국 {agency_name} 관련 뉴스를 매일 카카오톡 단톡방에 공유하는 편집자다. "
         "제공된 기사 목록에 있는 사실만 사용하고 추측하지 않는다. "
-        "병무청과 직접 관련성이 낮은 기사는 제외하거나 한 줄로만 언급한다. "
+        f"{agency_name}과 직접 관련성이 낮은 기사는 제외하거나 한 줄로만 언급한다. "
         "문장은 간결한 한국어로 작성한다. 광고성 표현과 과장은 금지한다. "
-        "Opinion은 기사 사실을 넘어 단정하지 말고, 병무행정 관점의 확인 포인트로만 쓴다."
+        f"Opinion은 기사 사실을 넘어 단정하지 말고, {policy_perspective} 관점의 확인 포인트로만 쓴다."
     )
     user_prompt = {
         "target_date": target_date.isoformat(),
         "format": (
-            "🪖 YYYY-MM-DD 병무청 뉴스 브리핑\n"
-            "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했어요. "
-            "개별 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.\n\n"
+            f"🪖 YYYY-MM-DD {agency_name} 뉴스 브리핑\n"
+            f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식을 정리했어요. "
+            f"개별 신청·접수 조건은 원문과 {agency_name} 공식 안내를 함께 확인해 주세요.\n\n"
             "---\n\n"
-            "오늘의 병무청 뉴스 톡 📡\n"
+            f"오늘의 {agency_name} 뉴스 톡 📡\n"
             "# 1️⃣ 기사 제목\n"
             "기사 요약 1~2문장. 줄임표 없이 경어체로 끝맺음.\n"
-            "Opinion: 병무행정 관점의 의미나 확인 포인트 1~2문장.\n"
+            f"Opinion: {policy_perspective} 관점의 의미나 확인 포인트 1~2문장.\n"
             "Source: 매체 / 링크\n\n"
             "# 2️⃣ 기사 제목\n"
             "기사 요약 1~2문장.\n\n"
@@ -93,7 +95,7 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
             "오늘 한 줄 요약 🎯\n"
             "전체 흐름을 한 문장으로 요약.\n\n"
             "---\n\n"
-            "💡 병역·입영·복무 관련 일정은 개인별 조건에 따라 달라질 수 있어요. "
+            f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. "
             "실제 신청 전 공식 안내를 한 번 더 확인해 주세요."
         ),
         "articles": article_payload(articles),
@@ -189,19 +191,24 @@ def _load_json_object(raw_text: str) -> dict[str, Any]:
 
 
 def _render_codex_summary(
-    target_date: date, data: dict[str, Any], articles: list[Article], weather_summary: str = ""
+    target_date: date,
+    data: dict[str, Any],
+    articles: list[Article],
+    agency_name: str,
+    weather_summary: str = "",
 ) -> str:
+    policy_perspective = "병무행정" if agency_name == "병무청" else f"{agency_name} 정책"
     lines = [
-        f"🪖 {target_date.isoformat()} 병무청 뉴스 브리핑",
+        f"🪖 {target_date.isoformat()} {agency_name} 뉴스 브리핑",
     ]
     if weather_summary:
         lines.extend([weather_summary, ""])
     lines.extend([
-        "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식을 정리했습니다. 개별 신청과 접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
+        f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식을 정리했습니다. 개별 신청과 접수 조건은 원문과 {agency_name} 공식 안내를 함께 확인해 주세요.",
         "",
         "---",
         "",
-        "오늘의 병무청 뉴스 톡 📡",
+        f"오늘의 {agency_name} 뉴스 톡 📡",
     ])
 
     rendered_items = 0
@@ -228,9 +235,9 @@ def _render_codex_summary(
                 articles[rendered_items - 1] if rendered_items <= len(articles) else None
             )
             fallback_opinion = (
-                _article_opinion(fallback_article)
+                _article_opinion(fallback_article, agency_name)
                 if fallback_article
-                else "병무청 관련 행정·제도 흐름을 확인할 수 있는 기사예요. 실제 세부 조건은 원문과 공식 안내에서 확인하는 게 좋습니다."
+                else f"{agency_name} 관련 행정·제도 흐름을 확인할 수 있는 기사예요. 실제 세부 조건은 원문과 공식 안내에서 확인하는 게 좋습니다."
             )
             lines.extend(
                 [
@@ -251,7 +258,7 @@ def _render_codex_summary(
 
     one_line = _clean_text(data.get("one_line"), 220)
     if not one_line:
-        one_line = _one_line_summary(articles) if articles else "오늘은 공유할 만한 병무청 직접 관련 뉴스가 확인되지 않았습니다."
+        one_line = _one_line_summary(articles, agency_name) if articles else f"오늘은 공유할 만한 {agency_name} 직접 관련 뉴스가 확인되지 않았습니다."
 
     lines.extend(
         [
@@ -262,7 +269,7 @@ def _render_codex_summary(
             "",
             "---",
             "",
-            "💡 병역·입영·복무 관련 일정은 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 공식 안내를 한 번 더 확인해 주세요.",
+            f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 {agency_name} 공식 안내를 한 번 더 확인해 주세요.",
         ]
     )
     return "\n".join(lines)
@@ -271,8 +278,11 @@ def _render_codex_summary(
 def summarize_with_codex(config: Config, target_date: date, articles: list[Article]) -> str:
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    agency_name = config.agency_name
+    policy_perspective = "병무행정" if agency_name == "병무청" else f"{agency_name} 정책"
     payload = {
         "target_date": target_date.isoformat(),
+        "agency_name": agency_name,
         "total_articles": len(articles),
         "articles": codex_article_payload(articles),
     }
@@ -300,11 +310,11 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
-            "Exclude or briefly down-rank articles that are weakly related to 병무청.",
-            "For opinion, write only a cautious 병무행정 관점의 확인 포인트.",
+            f"Exclude or briefly down-rank articles that are weakly related to {agency_name}.",
+            f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
             "For each item summary, write one or two short polite spoken Korean sentences.",
-            'Required JSON schema: {"items":[{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"병무행정 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}',
+            f'Required JSON schema: {{"items":[{{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
             "items는 최대 8개만 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]
     )
@@ -363,7 +373,7 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             debug_path = output_dir / f"codex-raw-{target_date.isoformat()}.txt"
             debug_path.write_text(raw_summary, encoding="utf-8")
             raise RuntimeError(f"Codex CLI JSON 파싱 실패(raw: {debug_path}): {exc}") from exc
-        return _render_codex_summary(target_date, summary_data, articles)
+        return _render_codex_summary(target_date, summary_data, articles, agency_name)
     finally:
         try:
             output_path.unlink()
@@ -382,7 +392,9 @@ def _trim_sentence(value: str, limit: int = 180) -> str:
     return text[:limit].rstrip(" .,")
 
 
-def _article_opinion(article: Article) -> str:
+def _article_opinion(article: Article, agency_name: str = "병무청") -> str:
+    if agency_name != "병무청":
+        return f"{agency_name} 관련 정책이나 현장 안내는 세부 대상과 일정이 달라질 수 있어요. 기사 내용만으로 단정하지 말고 원문과 {agency_name} 공식 안내를 함께 확인하는 게 좋습니다."
     haystack = f"{article.title} {article.summary}".lower()
     if "전문연구요원" in haystack or "산업기능요원" in haystack or "병역특례" in haystack:
         return "병역특례 지정·추천 소식은 기업과 지원자 모두에게 영향을 줄 수 있어요. 제도 요건과 실제 신청 가능 여부는 별도 확인이 필요합니다."
@@ -399,7 +411,9 @@ def _article_opinion(article: Article) -> str:
     return "병무청 관련 행정·제도 흐름을 확인할 수 있는 기사예요. 기사에 없는 세부 조건은 추정하지 말고 원문과 공식 안내를 함께 보는 게 좋습니다."
 
 
-def _one_line_summary(articles: list[Article]) -> str:
+def _one_line_summary(articles: list[Article], agency_name: str = "병무청") -> str:
+    if agency_name != "병무청":
+        return f"{agency_name} 관련 제도와 현장 소식이 네이버 뉴스 기준으로 이어진 하루였습니다."
     titles = " ".join(article.title for article in articles[:5])
     if "경진대회" in titles or "공공데이터" in titles:
         return "공공데이터·AI 활용, 복무 인력 관리, 지방병무청 현장 소식이 함께 포착된 하루였습니다."
@@ -408,20 +422,21 @@ def _one_line_summary(articles: list[Article]) -> str:
     return "병무청 관련 제도·행사·현장 안내가 네이버 뉴스 기준으로 이어진 하루였습니다."
 
 
-def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
-    header = f"🪖 {target_date.isoformat()} 병무청 뉴스 브리핑"
+def summarize_heuristic(config: Config, target_date: date, articles: list[Article]) -> str:
+    agency_name = config.agency_name
+    header = f"🪖 {target_date.isoformat()} {agency_name} 뉴스 브리핑"
     if not articles:
         lines = [header]
         lines.extend(
             [
-            "네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식이 많지 않았어요. "
-            "급한 신청·접수 일정은 병무청 공식 안내를 한 번 더 확인해 주세요.\n\n"
+            f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식이 많지 않았어요. "
+            f"급한 신청·접수 일정은 {agency_name} 공식 안내를 한 번 더 확인해 주세요.\n\n"
             "---\n\n"
-            "오늘의 병무청 뉴스 톡 📡\n"
+            f"오늘의 {agency_name} 뉴스 톡 📡\n"
             "확인된 주요 뉴스가 없습니다.\n\n"
             "---\n\n"
             "오늘 한 줄 요약 🎯\n"
-            "오늘은 공유할 만한 병무청 직접 관련 뉴스가 확인되지 않았습니다.\n\n"
+            f"오늘은 공유할 만한 {agency_name} 직접 관련 뉴스가 확인되지 않았습니다.\n\n"
             "---\n\n"
             "💡 필요하면 검색어를 넓히거나 Google News·정책브리핑 RSS 보조 출처를 켜서 다시 확인할 수 있어요."
             ]
@@ -431,11 +446,11 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
     top = articles[:8]
     lines = [
         header,
-        f"네이버 뉴스 기준으로 확인한 병무청 관련 주요 소식 {len(articles)}건을 정리했어요. 신청·접수 조건은 원문과 병무청 공식 안내를 함께 확인해 주세요.",
+        f"네이버 뉴스 기준으로 확인한 {agency_name} 관련 주요 소식 {len(articles)}건을 정리했어요. 신청·접수 조건은 원문과 {agency_name} 공식 안내를 함께 확인해 주세요.",
         "",
         "---",
         "",
-        "오늘의 병무청 뉴스 톡 📡",
+        f"오늘의 {agency_name} 뉴스 톡 📡",
     ]
 
     for idx, article in enumerate(top, start=1):
@@ -445,7 +460,7 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
             [
                 f"# {number} {article.title}",
                 f"{summary} 🎯",
-                f"Opinion: {_article_opinion(article)}",
+                f"Opinion: {_article_opinion(article, agency_name)}",
                 f"Source: {article.source or '네이버 뉴스'} / {article.url}",
                 "",
             ]
@@ -460,11 +475,11 @@ def summarize_heuristic(target_date: date, articles: list[Article]) -> str:
             "---",
             "",
             "오늘 한 줄 요약 🎯",
-            _one_line_summary(articles),
+            _one_line_summary(articles, agency_name),
             "",
             "---",
             "",
-            "💡 병역·입영·복무 관련 일정은 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 공식 안내를 한 번 더 확인해 주세요.",
+            f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 {agency_name} 공식 안내를 한 번 더 확인해 주세요.",
         ]
     )
     return "\n".join(lines)
@@ -476,18 +491,18 @@ def build_summary(config: Config, target_date: date, articles: list[Article]) ->
         try:
             return _with_weather(config, summarize_with_codex(config, target_date, articles))
         except Exception as exc:
-            fallback = summarize_heuristic(target_date, articles)
+            fallback = summarize_heuristic(config, target_date, articles)
             return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
     if provider == "openai":
         return _with_weather(config, summarize_with_openai(config, target_date, articles))
     if provider in {"heuristic", "none", "fallback"}:
-        return _with_weather(config, summarize_heuristic(target_date, articles))
+        return _with_weather(config, summarize_heuristic(config, target_date, articles))
     if provider not in {"auto", ""}:
         raise RuntimeError(f"지원하지 않는 SUMMARY_PROVIDER입니다: {provider}")
     if config.openai_api_key:
         try:
             return _with_weather(config, summarize_with_openai(config, target_date, articles))
         except Exception as exc:
-            fallback = summarize_heuristic(target_date, articles)
+            fallback = summarize_heuristic(config, target_date, articles)
             return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
-    return _with_weather(config, summarize_heuristic(target_date, articles))
+    return _with_weather(config, summarize_heuristic(config, target_date, articles))

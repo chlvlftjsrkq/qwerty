@@ -44,6 +44,11 @@ EMOJI_PATTERN = re.compile(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a podcast MP3 from a daily summary Markdown file.")
     parser.add_argument("--date", required=True, help="Episode date in YYYY-MM-DD.")
+    parser.add_argument(
+        "--episode-id",
+        default="",
+        help="Unique episode id used for audio/script filenames. Defaults to --date.",
+    )
     parser.add_argument("--summary", default="", help="Summary Markdown path. Defaults to runs/summary-YYYY-MM-DD.md.")
     parser.add_argument("--podcast-dir", default="podcast", help="Podcast output directory.")
     parser.add_argument("--site-base-url", default=os.getenv("PODCAST_BASE_URL", ""), help="Public podcast page URL.")
@@ -56,6 +61,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=float(os.getenv("TTS_TARGET_MINUTES", "5")),
         help="Approximate maximum narration length. The script is compact and may be shorter when there are few articles.",
+    )
+    parser.add_argument(
+        "--include-weather",
+        action="store_true",
+        default=os.getenv("TTS_INCLUDE_WEATHER", "").strip().lower() in {"1", "true", "yes", "y", "on"},
+        help="Include the weather line in the spoken podcast script. Disabled by default.",
     )
     return parser.parse_args()
 
@@ -121,6 +132,15 @@ def extract_weather(summary: str) -> str:
         if line.startswith("🌤️"):
             return ensure_clear_ending(clean_for_speech(line))
     return ""
+
+
+def extract_agency_name(summary: str) -> str:
+    for raw_line in summary.splitlines():
+        line = raw_line.strip()
+        match = re.match(r"^🪖\s+\d{4}-\d{2}-\d{2}\s+(.+?)\s+뉴스\s+브리핑$", line)
+        if match:
+            return clean_for_speech(match.group(1)) or "기관"
+    return "기관"
 
 
 def extract_articles(summary: str) -> list[dict[str, str]]:
@@ -193,23 +213,29 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
     return lines
 
 
-def markdown_to_speech(summary: str, target_date: str, target_minutes: float = 5.0) -> str:
-    weather = extract_weather(summary)
+def markdown_to_speech(
+    summary: str,
+    target_date: str,
+    target_minutes: float = 5.0,
+    include_weather: bool = False,
+) -> str:
+    weather = extract_weather(summary) if include_weather else ""
+    agency_name = extract_agency_name(summary)
     articles = extract_articles(summary)
     max_chars = max(700, int(target_minutes * 900))
-    intro = f"{target_date} 병무청 뉴스 음성 브리핑입니다."
+    intro = f"{target_date} {agency_name} 뉴스 음성 브리핑입니다."
     if not articles:
         lines = [intro]
         if weather:
             lines.append(weather)
-        lines.append("네이버 뉴스 기준으로 공유할 만한 병무청 관련 주요 기사가 많지 않았습니다.")
+        lines.append(f"네이버 뉴스 기준으로 공유할 만한 {agency_name} 관련 주요 기사가 많지 않았습니다.")
         return "\n".join(lines)
 
     opening = f"오늘은 주요 기사 {len(articles)}건을 제목과 핵심 내용 중심으로 전해드리겠습니다."
     lines = build_compact_lines(articles, max_chars=max_chars - len(intro) - len(opening) - 40)
     if len(lines) < len(articles):
         lines.append("나머지 기사는 중복이거나 관련성이 낮아 음성 요약에서는 줄였습니다.")
-    closing = "자세한 신청 조건과 일정은 원문 기사와 병무청 공식 안내를 함께 확인하시기 바랍니다."
+    closing = f"자세한 신청 조건과 일정은 원문 기사와 {agency_name} 공식 안내를 함께 확인하시기 바랍니다."
     output = [intro]
     if weather:
         output.append(weather)
@@ -253,10 +279,10 @@ def update_manifest(path: Path, episode: dict[str, str]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def page_url(base_url: str, target_date: str) -> str:
+def page_url(base_url: str, episode_id: str) -> str:
     if not base_url:
         return ""
-    return base_url.rstrip("/") + f"/?date={target_date}"
+    return base_url.rstrip("/") + f"/?date={episode_id}"
 
 
 async def build() -> int:
@@ -266,6 +292,7 @@ async def build() -> int:
 
     args = parse_args()
     datetime.strptime(args.date, "%Y-%m-%d")
+    episode_id = args.episode_id.strip() or args.date
     summary_path = Path(args.summary) if args.summary else Path("runs") / f"summary-{args.date}.md"
     if not summary_path.exists():
         raise FileNotFoundError(f"Summary file not found: {summary_path}")
@@ -277,31 +304,33 @@ async def build() -> int:
     script_dir.mkdir(parents=True, exist_ok=True)
 
     summary = summary_path.read_text(encoding="utf-8")
-    speech_text = markdown_to_speech(summary, args.date, args.target_minutes)
-    script_path = script_dir / f"{args.date}.txt"
+    agency_name = extract_agency_name(summary)
+    speech_text = markdown_to_speech(summary, args.date, args.target_minutes, args.include_weather)
+    script_path = script_dir / f"{episode_id}.txt"
     script_path.write_text(speech_text, encoding="utf-8")
 
-    audio_path = audio_dir / f"{args.date}.mp3"
+    audio_path = audio_dir / f"{episode_id}.mp3"
     if args.provider == "edge":
         await synthesize_edge(speech_text, audio_path, args.voice, args.rate, args.pitch)
 
     manifest_path = podcast_dir / "manifest.json"
     episode = {
-        "date": args.date,
-        "title": f"{args.date} 병무청 뉴스 브리핑",
-        "description": "네이버 뉴스 기준 병무청 관련 음성 요약",
-        "audio": f"audio/{args.date}.mp3",
-        "script": f"scripts/{args.date}.txt",
-        "summary": f"../summaries/summary-{args.date}.md",
+        "date": episode_id,
+        "title": f"{args.date} {agency_name} 뉴스 브리핑",
+        "description": f"네이버 뉴스 기준 {agency_name} 관련 음성 요약",
+        "audio": f"audio/{episode_id}.mp3",
+        "script": f"scripts/{episode_id}.txt",
+        "summary": f"../summaries/summary-{episode_id}.md",
     }
     update_manifest(manifest_path, episode)
 
     result = {
         "date": args.date,
+        "episode_id": episode_id,
         "audio": str(audio_path),
         "script": str(script_path),
         "manifest": str(manifest_path),
-        "page_url": page_url(args.site_base_url, args.date),
+        "page_url": page_url(args.site_base_url, episode_id),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

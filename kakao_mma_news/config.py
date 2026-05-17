@@ -72,6 +72,7 @@ class Config:
     openai_api_key: str
     openai_model: str
     summary_provider: str
+    agency_name: str
     codex_command: str
     codex_model: str
     codex_timeout_seconds: float
@@ -142,6 +143,7 @@ def load_config(env_file: str | Path | None = ".env") -> Config:
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         summary_provider=os.getenv("SUMMARY_PROVIDER", "auto").strip().lower() or "auto",
+        agency_name=os.getenv("AGENCY_NAME", "병무청").strip() or "병무청",
         codex_command=os.getenv("CODEX_COMMAND", "codex.cmd"),
         codex_model=os.getenv("CODEX_MODEL", ""),
         codex_timeout_seconds=parse_float(os.getenv("CODEX_TIMEOUT_SECONDS"), 300.0),

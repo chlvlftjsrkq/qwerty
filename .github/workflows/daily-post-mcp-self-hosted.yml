@@ -1,10 +1,42 @@
 name: Daily MMA News Kakao Post via MCP
 
+run-name: Daily MMA News Kakao Post via MCP - ${{ inputs.agency || inputs.agency_index || 'auto' }}
+
 on:
-  schedule:
-    # TEMP actual Kakao delivery test: every 5 minutes, offset from busy :00/:05 boundaries.
-    # Restore to "7 23 * * *" after scheduled Kakao delivery is confirmed.
-    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+  workflow_dispatch:
+    inputs:
+      agency_index:
+        description: "기관 순번입니다. auto이면 현재 KST 시각에 맞는 기관을 선택합니다."
+        required: false
+        default: "auto"
+      agency:
+        description: "기관명을 직접 지정할 때 사용합니다. 예: 병무청"
+        required: false
+        default: ""
+      target_date:
+        description: "뉴스 기준일 YYYY-MM-DD. 비워두면 KST 기준 전날입니다."
+        required: false
+        default: ""
+      send_summary:
+        description: "카카오톡에 뉴스 요약 본문을 보냅니다."
+        type: boolean
+        required: false
+        default: true
+      send_podcast:
+        description: "카카오톡에 음성요약 듣기 링크를 따로 보냅니다."
+        type: boolean
+        required: false
+        default: true
+      include_weather_in_summary:
+        description: "본문 요약 첫부분에 선택 기관 지역 날씨를 넣습니다."
+        type: boolean
+        required: false
+        default: true
+      archive_results:
+        description: "요약과 음성 파일을 repository에 커밋합니다."
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
@@ -12,15 +44,115 @@ permissions:
 jobs:
   post:
     runs-on: [self-hosted, Windows, X64, kakao, qwerty]
-    timeout-minutes: 20
+    timeout-minutes: 30
     concurrency:
       group: daily-mma-news-kakao-post
       cancel-in-progress: false
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
-      TARGET_DATE_INPUT: ""
+      TARGET_DATE_INPUT: ${{ inputs.target_date }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select agency and test target
+        id: agency
+        shell: powershell
+        env:
+          AGENCY_INDEX_INPUT: ${{ inputs.agency_index }}
+          AGENCY_NAME_INPUT: ${{ inputs.agency }}
+          INCLUDE_WEATHER_INPUT: ${{ inputs.include_weather_in_summary }}
+          TARGET_DATE_INPUT: ${{ inputs.target_date }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $schedule = Get-Content -Path "config\agency_schedule.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          $agencies = @($schedule.agencies)
+          if ($agencies.Count -eq 0) {
+            throw "config\agency_schedule.json에 기관 목록이 없습니다."
+          }
+
+          $agencyInput = "$env:AGENCY_NAME_INPUT".Trim()
+          $indexInput = "$env:AGENCY_INDEX_INPUT".Trim()
+          $selectedIndex = -1
+
+          if (![string]::IsNullOrWhiteSpace($agencyInput)) {
+            for ($i = 0; $i -lt $agencies.Count; $i++) {
+              if ($agencies[$i].agency -eq $agencyInput) {
+                $selectedIndex = $i
+                break
+              }
+            }
+            if ($selectedIndex -lt 0) {
+              throw "기관명을 찾지 못했습니다: $agencyInput"
+            }
+          } elseif (![string]::IsNullOrWhiteSpace($indexInput) -and $indexInput -ne "auto") {
+            $selectedIndex = [int]$indexInput
+            $selectedIndex = (($selectedIndex % $agencies.Count) + $agencies.Count) % $agencies.Count
+          } else {
+            $kst = [System.TimeZoneInfo]::FindSystemTimeZoneById("Korea Standard Time")
+            $nowKst = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $kst)
+            $hour = [int]$nowKst.Hour
+            for ($i = 0; $i -lt $agencies.Count; $i++) {
+              if ([int]$agencies[$i].kst_hour -eq $hour) {
+                $selectedIndex = $i
+                break
+              }
+            }
+            if ($selectedIndex -lt 0) {
+              $selectedIndex = $hour % $agencies.Count
+            }
+          }
+
+          $selected = $agencies[$selectedIndex]
+          $agencyName = [string]$selected.agency
+          $agencySlug = ($agencyName -replace "[^\p{L}\p{Nd}]+", "-").Trim("-")
+          if ([string]::IsNullOrWhiteSpace($agencySlug)) {
+            $agencySlug = "agency-$selectedIndex"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_DATE_INPUT)) {
+            $kst = [System.TimeZoneInfo]::FindSystemTimeZoneById("Korea Standard Time")
+            $nowKst = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $kst)
+            $targetDate = $nowKst.Date.AddDays(-1).ToString("yyyy-MM-dd")
+          } else {
+            $targetDate = $env:TARGET_DATE_INPUT.Trim()
+          }
+
+          $episodeId = "$targetDate-$agencySlug"
+          $queryTerms = @(
+            $agencyName,
+            "$agencyName 뉴스",
+            "$agencyName 정책",
+            "$agencyName 보도자료"
+          ) -join ","
+          $includeWeather = if ("$env:INCLUDE_WEATHER_INPUT".Trim().ToLowerInvariant() -eq "false") { "false" } else { "true" }
+
+          $envLines = @(
+            "AGENCY_INDEX=$selectedIndex",
+            "AGENCY_NAME=$agencyName",
+            "AGENCY_SLUG=$agencySlug",
+            "EPISODE_ID=$episodeId",
+            "TARGET_DATE_RESOLVED=$targetDate",
+            "NEWS_QUERY_TERMS=$queryTerms",
+            "NEWS_REQUIRED_TERMS=$agencyName",
+            "WEATHER_ENABLED=$includeWeather",
+            "WEATHER_LOCATION=$($selected.weather_location)",
+            "WEATHER_LATITUDE=$($selected.weather_latitude)",
+            "WEATHER_LONGITUDE=$($selected.weather_longitude)"
+          )
+          foreach ($line in $envLines) {
+            Add-Content -Path $env:GITHUB_ENV -Value $line -Encoding UTF8
+          }
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "agency=$agencyName" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "agency_index=$selectedIndex" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "episode_id=$episodeId" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "target_date=$targetDate" -Encoding UTF8
+
+          Write-Host "Selected agency: $agencyName"
+          Write-Host "Selected agency index: $selectedIndex"
+          Write-Host "Target date: $targetDate"
+          Write-Host "Episode id: $episodeId"
+          Write-Host "Weather location: $($selected.weather_location)"
 
       - name: Verify local Python
         shell: powershell
@@ -42,19 +174,18 @@ jobs:
           CODEX_TIMEOUT_SECONDS: ${{ vars.CODEX_TIMEOUT_SECONDS || '300' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
-          WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
-          WEATHER_LOCATION: ${{ vars.WEATHER_LOCATION || '서울' }}
-          WEATHER_LATITUDE: ${{ vars.WEATHER_LATITUDE || '37.5665' }}
-          WEATHER_LONGITUDE: ${{ vars.WEATHER_LONGITUDE || '126.9780' }}
           NAVER_NEWS_ENABLED: "true"
           GOOGLE_NEWS_ENABLED: "false"
           POLICY_RSS_ENABLED: "false"
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
         run: |
-          $argsList = @("-m", "kakao_mma_news", "--dry-run")
-          if (![string]::IsNullOrWhiteSpace($env:TARGET_DATE_INPUT)) {
-            $argsList += @("--date", "$env:TARGET_DATE_INPUT")
-          }
+          $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          $argsList = @(
+            "-m", "kakao_mma_news",
+            "--dry-run",
+            "--date", "$env:TARGET_DATE_RESOLVED",
+            "--output", "$summaryPath"
+          )
           & $env:PYTHON_EXE @argsList
 
       - name: Build podcast audio
@@ -68,39 +199,35 @@ jobs:
           PODCAST_BASE_URL: ${{ vars.PODCAST_BASE_URL || format('https://{0}.github.io/{1}/podcast/', github.repository_owner, github.event.repository.name) }}
           PODCAST_LISTEN_URL_TEMPLATE: ${{ vars.PODCAST_LISTEN_URL_TEMPLATE || '' }}
         run: |
-          $summary = Get-ChildItem -Path runs -Filter "summary-*.md" |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-          if ($null -eq $summary) {
-            throw "No summary Markdown file found in runs/."
+          $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          if (!(Test-Path $summaryPath)) {
+            throw "No summary Markdown file found: $summaryPath"
           }
-          $summaryDate = $summary.BaseName -replace "^summary-", ""
-          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date $summaryDate --summary "$($summary.FullName)" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES"
+          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date "$env:TARGET_DATE_RESOLVED" --episode-id "$env:EPISODE_ID" --summary "$summaryPath" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES"
           if ([string]::IsNullOrWhiteSpace($env:PODCAST_LISTEN_URL_TEMPLATE)) {
-            $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$summaryDate"
+            $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$env:EPISODE_ID"
           } else {
-            $listenUrl = $env:PODCAST_LISTEN_URL_TEMPLATE.Replace("{date}", $summaryDate)
+            $listenUrl = $env:PODCAST_LISTEN_URL_TEMPLATE.Replace("{date}", $env:EPISODE_ID)
           }
-          $messagePath = Join-Path "runs" "podcast-message-$summaryDate.txt"
+          $messagePath = Join-Path "runs" "podcast-message-$env:EPISODE_ID.txt"
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           $label = [char]::ConvertFromUtf32(0x1F3A7) + " " + [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("7J2M7ISx7JqU7JW9IOuTo+q4sA=="))
           [System.IO.File]::WriteAllText($messagePath, "$label`n$listenUrl", $utf8NoBom)
 
       - name: Archive summary to repository
+        if: ${{ inputs.archive_results == true }}
         shell: powershell
         run: |
-          $summary = Get-ChildItem -Path runs -Filter "summary-*.md" |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-          if ($null -eq $summary) {
-            throw "No summary Markdown file found in runs/."
+          $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          if (!(Test-Path $summaryPath)) {
+            throw "No summary Markdown file found: $summaryPath"
           }
+          $summary = Get-Item -LiteralPath $summaryPath
           New-Item -ItemType Directory -Force -Path summaries | Out-Null
           $archivePath = Join-Path "summaries" $summary.Name
           Copy-Item -LiteralPath $summary.FullName -Destination $archivePath -Force
-          $summaryDate = $summary.BaseName -replace "^summary-", ""
-          $podcastAudio = Join-Path "podcast\audio" "$summaryDate.mp3"
-          $podcastScript = Join-Path "podcast\scripts" "$summaryDate.txt"
+          $podcastAudio = Join-Path "podcast\audio" "$env:EPISODE_ID.mp3"
+          $podcastScript = Join-Path "podcast\scripts" "$env:EPISODE_ID.txt"
           $podcastManifest = "podcast\manifest.json"
 
           git config user.name "github-actions[bot]"
@@ -111,7 +238,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($changes)) {
             Write-Host "No summary or podcast changes to archive."
           } else {
-            git commit -m "Archive MMA news summary $summaryDate"
+            git commit -m "Archive $env:AGENCY_NAME news summary $env:EPISODE_ID"
             $branch = if ([string]::IsNullOrWhiteSpace($env:GITHUB_REF_NAME)) { "main" } else { $env:GITHUB_REF_NAME }
             git fetch origin $branch
             git rebase "origin/$branch"
@@ -119,6 +246,7 @@ jobs:
           }
 
       - name: Post summary to KakaoTalk
+        if: ${{ inputs.send_summary == true }}
         shell: powershell
         env:
           TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
@@ -126,19 +254,18 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
             throw "Repository variable TARGET_CHATROOM is required."
           }
-          $summary = Get-ChildItem -Path runs -Filter "summary-*.md" |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-          if ($null -eq $summary) {
-            throw "No summary Markdown file found in runs/."
+          $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          if (!(Test-Path $summaryPath)) {
+            throw "No summary Markdown file found: $summaryPath"
           }
           $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
           if (!(Test-Path $mcpCommand)) {
             throw "kakaotalk-mcp executable was not found: $mcpCommand"
           }
-          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($summary.FullName)" --mcp-command "$mcpCommand" --verify
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand" --verify
 
       - name: Post podcast link to KakaoTalk
+        if: ${{ inputs.send_podcast == true }}
         shell: powershell
         env:
           TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
@@ -146,20 +273,30 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
             throw "Repository variable TARGET_CHATROOM is required."
           }
-          $message = Get-ChildItem -Path runs -Filter "podcast-message-*.txt" |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-          if ($null -eq $message) {
-            throw "No podcast message file found in runs/."
+          $messagePath = Join-Path "runs" "podcast-message-$env:EPISODE_ID.txt"
+          if (!(Test-Path $messagePath)) {
+            throw "No podcast message file found: $messagePath"
           }
           $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
           if (!(Test-Path $mcpCommand)) {
             throw "kakaotalk-mcp executable was not found: $mcpCommand"
           }
-          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$($message.FullName)" --mcp-command "$mcpCommand" --verify
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$messagePath" --mcp-command "$mcpCommand" --verify
+
+      - name: Write run summary
+        if: always()
+        shell: powershell
+        run: |
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Agency Kakao dispatch" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Agency: $env:AGENCY_NAME" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Agency index: $env:AGENCY_INDEX" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target date: $env:TARGET_DATE_RESOLVED" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Episode id: $env:EPISODE_ID" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Weather location: $env:WEATHER_LOCATION" -Encoding UTF8
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mma-news-runs
+          name: mma-news-runs-${{ env.EPISODE_ID }}
           path: runs/
