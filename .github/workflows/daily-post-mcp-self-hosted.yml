@@ -96,14 +96,15 @@ jobs:
             $selectedIndex = [int]$indexInput
             $selectedIndex = (($selectedIndex % $agencies.Count) + $agencies.Count) % $agencies.Count
           } elseif ($env:GITHUB_EVENT_NAME -eq "schedule") {
+            $cronAgencyName = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("67OR66y07LKt"))
             for ($i = 0; $i -lt $agencies.Count; $i++) {
-              if ($agencies[$i].agency -eq "병무청") {
+              if ($agencies[$i].agency -eq $cronAgencyName) {
                 $selectedIndex = $i
                 break
               }
             }
             if ($selectedIndex -lt 0) {
-              throw "백업 cron 대상 기관 병무청을 찾지 못했습니다."
+              throw "Backup cron agency was not found."
             }
           } else {
             $kst = [System.TimeZoneInfo]::FindSystemTimeZoneById("Korea Standard Time")
