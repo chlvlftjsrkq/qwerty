@@ -25,6 +25,14 @@
       "summary": "../summaries/summary-2026-05-16-식품의약품안전처.md"
     },
     {
+      "date": "2026-05-16-병무청",
+      "title": "2026-05-16 병무청 뉴스 브리핑",
+      "description": "네이버 뉴스 기준 병무청 관련 음성 요약",
+      "audio": "audio/2026-05-16-병무청.mp3",
+      "script": "scripts/2026-05-16-병무청.txt",
+      "summary": "../summaries/summary-2026-05-16-병무청.md"
+    },
+    {
       "date": "2026-05-16-국토교통부",
       "title": "2026-05-16 국토교통부 뉴스 브리핑",
       "description": "네이버 뉴스 기준 국토교통부 관련 음성 요약",
