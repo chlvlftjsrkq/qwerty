@@ -70,12 +70,12 @@ Register-ScheduledTask `
     -Description "Dispatches the qwerty agency Kakao GitHub Actions workflow every $IntervalMinutes minutes." `
     -Force | Out-Null
 
-Write-Host "등록 완료: $TaskName"
-Write-Host "반복 간격: $IntervalMinutes분"
-Write-Host "첫 실행 예정: $startAt"
-Write-Host "대상 workflow: $Repo / $Workflow"
+Write-Host "Registered task: $TaskName"
+Write-Host "Interval minutes: $IntervalMinutes"
+Write-Host "First scheduled run: $startAt"
+Write-Host "Workflow target: $Repo / $Workflow"
 
 if ($StartNow) {
     Start-ScheduledTask -TaskName $TaskName
-    Write-Host "즉시 실행을 요청했습니다: $TaskName"
+    Write-Host "Requested immediate run: $TaskName"
 }

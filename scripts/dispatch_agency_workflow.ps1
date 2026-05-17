@@ -21,14 +21,14 @@ if ([string]::IsNullOrWhiteSpace($StatePath)) {
 }
 
 if (!(Test-Path -LiteralPath $GhExe)) {
-    throw "GitHub CLI를 찾지 못했습니다: $GhExe"
+    throw "GitHub CLI was not found: $GhExe"
 }
 
 $schedulePath = Join-Path $Root "config\agency_schedule.json"
 $schedule = Get-Content -LiteralPath $schedulePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $agencies = @($schedule.agencies)
 if ($agencies.Count -eq 0) {
-    throw "기관 목록이 비어 있습니다: $schedulePath"
+    throw "Agency schedule is empty: $schedulePath"
 }
 
 $selectedIndex = -1
@@ -40,7 +40,7 @@ if (![string]::IsNullOrWhiteSpace($Agency)) {
         }
     }
     if ($selectedIndex -lt 0) {
-        throw "기관명을 찾지 못했습니다: $Agency"
+        throw "Agency was not found: $Agency"
     }
 } elseif ($AgencyIndex -ge 0) {
     $selectedIndex = (($AgencyIndex % $agencies.Count) + $agencies.Count) % $agencies.Count
