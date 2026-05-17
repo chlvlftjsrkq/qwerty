@@ -224,20 +224,63 @@ jobs:
           $podcastAudio = Join-Path "podcast\audio" "$env:EPISODE_ID.mp3"
           $podcastScript = Join-Path "podcast\scripts" "$env:EPISODE_ID.txt"
           $podcastManifest = "podcast\manifest.json"
+          foreach ($path in @($podcastAudio, $podcastScript, $podcastManifest)) {
+            if (!(Test-Path $path)) {
+              throw "Archive input was not found: $path"
+            }
+          }
+
+          $tempDir = Join-Path $env:RUNNER_TEMP "archive-$env:EPISODE_ID"
+          New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+          Copy-Item -LiteralPath $summary.FullName -Destination (Join-Path $tempDir $summary.Name) -Force
+          Copy-Item -LiteralPath $podcastAudio -Destination (Join-Path $tempDir "$env:EPISODE_ID.mp3") -Force
+          Copy-Item -LiteralPath $podcastScript -Destination (Join-Path $tempDir "$env:EPISODE_ID.txt") -Force
+          Copy-Item -LiteralPath $podcastManifest -Destination (Join-Path $tempDir "manifest.json") -Force
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- $archivePath $podcastAudio $podcastScript $podcastManifest
 
-          $changes = git status --porcelain -- $archivePath $podcastAudio $podcastScript $podcastManifest
-          if ([string]::IsNullOrWhiteSpace($changes)) {
-            Write-Host "No summary or podcast changes to archive."
-          } else {
-            git commit -m "Archive $env:AGENCY_NAME news summary $env:EPISODE_ID"
-            $branch = if ([string]::IsNullOrWhiteSpace($env:GITHUB_REF_NAME)) { "main" } else { $env:GITHUB_REF_NAME }
-            git fetch origin $branch
-            git rebase "origin/$branch"
-            git push origin "HEAD:$branch"
+          function Invoke-Git {
+            & git @args
+            if ($LASTEXITCODE -ne 0) {
+              throw "git $($args -join ' ') failed with exit code $LASTEXITCODE"
+            }
+          }
+
+          $branch = if ([string]::IsNullOrWhiteSpace($env:GITHUB_REF_NAME)) { "main" } else { $env:GITHUB_REF_NAME }
+          $pushed = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Archive push attempt $attempt"
+            Invoke-Git fetch origin $branch
+            Invoke-Git reset --hard "origin/$branch"
+
+            New-Item -ItemType Directory -Force -Path summaries | Out-Null
+            New-Item -ItemType Directory -Force -Path "podcast\audio" | Out-Null
+            New-Item -ItemType Directory -Force -Path "podcast\scripts" | Out-Null
+            Copy-Item -LiteralPath (Join-Path $tempDir $summary.Name) -Destination $archivePath -Force
+            Copy-Item -LiteralPath (Join-Path $tempDir "$env:EPISODE_ID.mp3") -Destination $podcastAudio -Force
+            Copy-Item -LiteralPath (Join-Path $tempDir "$env:EPISODE_ID.txt") -Destination $podcastScript -Force
+            Copy-Item -LiteralPath (Join-Path $tempDir "manifest.json") -Destination $podcastManifest -Force
+
+            Invoke-Git add -- $archivePath $podcastAudio $podcastScript $podcastManifest
+            $changes = git status --porcelain -- $archivePath $podcastAudio $podcastScript $podcastManifest
+            if ([string]::IsNullOrWhiteSpace($changes)) {
+              Write-Host "No summary or podcast changes to archive."
+              $pushed = $true
+              break
+            }
+
+            Invoke-Git commit -m "Archive $env:AGENCY_NAME news summary $env:EPISODE_ID"
+            & git push origin "HEAD:$branch"
+            if ($LASTEXITCODE -eq 0) {
+              $pushed = $true
+              break
+            }
+            Write-Host "git push failed with exit code $LASTEXITCODE. Retrying after syncing latest main."
+            Start-Sleep -Seconds 5
+          }
+          if (-not $pushed) {
+            throw "Failed to archive summary after 3 attempts."
           }
 
       - name: Post summary to KakaoTalk
