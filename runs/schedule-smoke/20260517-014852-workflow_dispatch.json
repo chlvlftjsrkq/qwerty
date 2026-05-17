@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "workflow": "Schedule Smoke Test",
+  "event_name": "workflow_dispatch",
+  "run_id": "25978375689",
+  "run_number": "2",
+  "run_attempt": "1",
+  "ref_name": "main",
+  "sha": "8b0ae45d7269082e3dc39d2c5912e7cb9bcbabb8",
+  "recorded_at_utc": "2026-05-17T01:48:52Z",
+  "run_url": "https://github.com/chlvlftjsrkq/qwerty/actions/runs/25978375689"
+}
