@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms, strip_html
@@ -9,6 +11,7 @@ from kakao_mma_news.summarize import (
     _render_codex_summary,
     summarize_heuristic,
 )
+from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import markdown_to_speech
 
 
@@ -49,7 +52,8 @@ class CoreTests(unittest.TestCase):
             "서울지방병무청이 병역진로설계 행사를 열었다.",
             "test",
         )
-        summary = summarize_heuristic(article.published_date_kst, [article])
+        config = SimpleNamespace(agency_name="병무청")
+        summary = summarize_heuristic(config, article.published_date_kst, [article])
         self.assertIn("오늘의 병무청 뉴스 톡", summary)
         self.assertIn("# 1️⃣ 서울지방병무청 행사", summary)
         self.assertIn("Opinion:", summary)
@@ -67,7 +71,7 @@ class CoreTests(unittest.TestCase):
         data = _load_json_object(
             '```json\n{"items":[{"title":"전북지방병무청 경진대회","summary":"업무 인수인계 개선을 위한 행사다.","opinion":"행정 품질 개선 효과를 확인할 필요가 있다.","source":"example.com","url":"https://example.com/news"}],"excluded_note":"","one_line":"지방병무청 업무 개선 소식이 중심이었다."}\n```'
         )
-        summary = _render_codex_summary(article.published_date_kst, data, [article])
+        summary = _render_codex_summary(article.published_date_kst, data, [article], "병무청")
         self.assertIn("🪖 2026-05-15 병무청 뉴스 브리핑", summary)
         self.assertIn("# 1️⃣ 전북지방병무청 경진대회", summary)
         self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
@@ -83,6 +87,49 @@ class CoreTests(unittest.TestCase):
             summary,
         )
 
+    def test_weather_summary_uses_conversational_outing_style(self):
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        class FakeRequests:
+            @staticmethod
+            def get(url, **kwargs):
+                if "air-quality" in url:
+                    return FakeResponse({"hourly": {"pm10": [61], "pm2_5": [26]}})
+                return FakeResponse(
+                    {
+                        "daily": {
+                            "weather_code": [2],
+                            "temperature_2m_max": [28],
+                            "temperature_2m_min": [16],
+                            "precipitation_probability_max": [0],
+                        }
+                    }
+                )
+
+        config = SimpleNamespace(
+            weather_enabled=True,
+            weather_location="세종",
+            weather_latitude=36.48,
+            weather_longitude=127.289,
+            request_timeout_seconds=3,
+        )
+        with patch.dict("sys.modules", {"requests": FakeRequests}):
+            summary = build_weather_summary(config)
+
+        self.assertIn("🌤️ 오늘 세종은 기온이 28도까지 오를 정도로 따뜻하고", summary)
+        self.assertIn("미세먼지 지수는 61 (보통)", summary)
+        self.assertIn("초미세먼지는 26 (보통)", summary)
+        self.assertIn("가벼운 외출에 딱 좋은 날이에요", summary)
+        self.assertIn("수분 충분히 챙기고", summary)
+
     def test_podcast_speech_cleans_markdown(self):
         speech = markdown_to_speech(
             "🌤️ 오늘 서울은 맑고 최고 25도입니다.\n"
@@ -91,6 +138,7 @@ class CoreTests(unittest.TestCase):
             "Opinion: 공식 안내 확인이 필요하다.\n"
             "Source: example.com / https://example.com/news\n",
             "2026-05-16",
+            include_weather=True,
         )
         self.assertIn("오늘 서울은 맑고 최고 25도입니다.", speech)
         self.assertIn("첫 번째 소식입니다. 병무청 공공데이터 기사.", speech)
