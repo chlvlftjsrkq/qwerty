@@ -3,8 +3,8 @@ name: Schedule Smoke Test
 on:
   workflow_dispatch:
   schedule:
-    # Temporary GitHub schedule smoke test: every 5 minutes, UTC.
-    - cron: "*/5 * * * *"
+    # Temporary GitHub schedule smoke test: every 5 minutes, offset from busy :00/:05 boundaries.
+    - cron: "4/5 * * * *"
 
 permissions:
   contents: write
