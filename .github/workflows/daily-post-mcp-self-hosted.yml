@@ -8,8 +8,8 @@ on:
         required: false
         default: ""
   schedule:
-    # TEMP schedule test: every 5 minutes. Restore to "7 23 * * *" after confirming schedule events.
-    - cron: "*/5 * * * *"
+    # Daily at 08:07 KST. GitHub cron uses UTC.
+    - cron: "7 23 * * *"
 
 permissions:
   contents: write
