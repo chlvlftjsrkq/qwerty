@@ -147,6 +147,7 @@ def normalize_symbols_for_tts(text: str) -> str:
     text = re.sub(r"(\d+)\s*%", r"\1 퍼센트", text)
     text = re.sub(r"(\d+)\s*명", r"\1 명", text)
     text = re.sub(r"(\d+)\s*건", r"\1 건", text)
+    text = re.sub(r"(\d+)\s*개", r"\1 개", text)
     text = re.sub(r"(\d+)\s*회", r"\1 회", text)
     text = re.sub(r"(\d+)\s*차", r"\1 차", text)
     text = re.sub(r"(\d+)\s*개월", r"\1 개월", text)

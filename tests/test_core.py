@@ -228,7 +228,7 @@ class CoreTests(unittest.TestCase):
             "# 3️⃣ 홍소영 병무청 장, 해병대 신병 1329기 입영문화제 이슈&톡\n"
             "홍소영 병무청 장이 현장을 방문했습니다.\n"
             "# 4️⃣ 대구·경북지방병무청 입영문화제\n"
-            "대구·경북지방병무청이 행사를 열었습니다.\n",
+            "대구·경북지방병무청이 행사를 열었습니다. 5개 자치구가 참여했습니다.\n",
             "2026-04-21",
         )
         self.assertIn("김종석의 리포트, 검찰", speech)
@@ -244,6 +244,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("이슈 앤 톡", speech)
         self.assertIn("대구경북지방병무청이 행사를 열었습니다.", speech)
         self.assertNotIn("대구, 경북지방병무청", speech)
+        self.assertIn("5 개 자치구", speech)
         self.assertIn("주요 내용입니다.", speech)
         self.assertNotIn("주요 내용은 대구경북지방병무청은", speech)
         self.assertIn("자세한 내용과 개인별 적용 조건", speech)
