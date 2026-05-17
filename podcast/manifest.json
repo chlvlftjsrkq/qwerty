@@ -57,6 +57,14 @@
       "summary": "../summaries/summary-2026-05-16-고용노동부.md"
     },
     {
+      "date": "2026-05-16-경찰청",
+      "title": "2026-05-16 경찰청 뉴스 브리핑",
+      "description": "네이버 뉴스 기준 경찰청 관련 음성 요약",
+      "audio": "audio/2026-05-16-경찰청.mp3",
+      "script": "scripts/2026-05-16-경찰청.txt",
+      "summary": "../summaries/summary-2026-05-16-경찰청.md"
+    },
+    {
       "date": "2026-05-16",
       "title": "2026-05-16 병무청 뉴스 브리핑",
       "description": "네이버 뉴스 기준 병무청 관련 음성 요약",
