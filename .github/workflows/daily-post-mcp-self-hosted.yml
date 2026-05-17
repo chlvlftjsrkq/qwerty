@@ -210,8 +210,9 @@ jobs:
           $messagePath = Join-Path "runs" "podcast-message-$env:EPISODE_ID.txt"
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           $targetDate = [datetime]::ParseExact($env:TARGET_DATE_RESOLVED, "yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture)
-          $dateLabel = $targetDate.ToString("yyyy년 M월 d일", [Globalization.CultureInfo]::InvariantCulture)
-          $label = [char]::ConvertFromUtf32(0x1F3A7) + "$dateLabel $env:AGENCY_NAME 뉴스 AI 음성요약 듣기"
+          $dateLabel = "$($targetDate.Year)$([char]0xB144) $($targetDate.Month)$([char]0xC6D4) $($targetDate.Day)$([char]0xC77C)"
+          $labelSuffix = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("64m07IqkIEFJIOydjOyEseyalOyVvSDrk6PquLA="))
+          $label = [char]::ConvertFromUtf32(0x1F3A7) + $dateLabel + " " + $env:AGENCY_NAME + " " + $labelSuffix
           [System.IO.File]::WriteAllText($messagePath, "$label`n$listenUrl", $utf8NoBom)
 
       - name: Archive summary to repository
