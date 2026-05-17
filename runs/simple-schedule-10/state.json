@@ -1,0 +1,17 @@
+{
+  "count": 1,
+  "runs": [
+    {
+      "number": 1,
+      "recorded_at_utc": "2026-05-17T06:35:17+00:00",
+      "event_name": "schedule",
+      "workflow": "Simple Schedule 10",
+      "run_id": "25983633606",
+      "run_number": "1",
+      "run_attempt": "1",
+      "ref_name": "main",
+      "sha": "733e4f2b269fc6d62146d7d69f24441c9ed2d86a",
+      "run_url": "https://github.com/chlvlftjsrkq/qwerty/actions/runs/25983633606"
+    }
+  ]
+}
