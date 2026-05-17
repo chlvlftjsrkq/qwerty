@@ -2,8 +2,9 @@ name: Daily MMA News Kakao Post via MCP
 
 on:
   schedule:
-    # Daily at 08:07 KST. GitHub cron uses UTC.
-    - cron: "7 23 * * *"
+    # TEMP actual Kakao delivery test: every 5 minutes, offset from busy :00/:05 boundaries.
+    # Restore to "7 23 * * *" after scheduled Kakao delivery is confirmed.
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
 
 permissions:
   contents: write
