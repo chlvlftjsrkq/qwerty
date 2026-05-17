@@ -118,12 +118,7 @@ jobs:
           }
 
           $episodeId = "$targetDate-$agencySlug"
-          $queryTerms = @(
-            $agencyName,
-            "$agencyName 뉴스",
-            "$agencyName 정책",
-            "$agencyName 보도자료"
-          ) -join ","
+          $queryTerms = $agencyName
           $includeWeather = if ("$env:INCLUDE_WEATHER_INPUT".Trim().ToLowerInvariant() -eq "false") { "false" } else { "true" }
 
           $envLines = @(

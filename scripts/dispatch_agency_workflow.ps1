@@ -7,13 +7,22 @@ param(
     [string]$TargetDate = "",
     [string]$Agency = "",
     [int]$AgencyIndex = -1,
-    [bool]$SendSummary = $true,
-    [bool]$SendPodcast = $true,
-    [bool]$IncludeWeatherInSummary = $true,
-    [bool]$ArchiveResults = $true
+    [string]$SendSummary = "true",
+    [string]$SendPodcast = "true",
+    [string]$IncludeWeatherInSummary = "true",
+    [string]$ArchiveResults = "true"
 )
 
 $ErrorActionPreference = "Stop"
+
+function Convert-ToWorkflowBool {
+    param([string]$Value)
+    $normalized = "$Value".Trim().ToLowerInvariant()
+    if ($normalized -in @("1", "true", "yes", "y", "on")) {
+        return "true"
+    }
+    return "false"
+}
 
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($StatePath)) {
@@ -69,10 +78,10 @@ $argsList = @(
     "--ref", $Ref,
     "--field", "agency_index=$selectedIndex",
     "--field", "agency=$agencyName",
-    "--field", "send_summary=$($SendSummary.ToString().ToLowerInvariant())",
-    "--field", "send_podcast=$($SendPodcast.ToString().ToLowerInvariant())",
-    "--field", "include_weather_in_summary=$($IncludeWeatherInSummary.ToString().ToLowerInvariant())",
-    "--field", "archive_results=$($ArchiveResults.ToString().ToLowerInvariant())"
+    "--field", "send_summary=$(Convert-ToWorkflowBool $SendSummary)",
+    "--field", "send_podcast=$(Convert-ToWorkflowBool $SendPodcast)",
+    "--field", "include_weather_in_summary=$(Convert-ToWorkflowBool $IncludeWeatherInSummary)",
+    "--field", "archive_results=$(Convert-ToWorkflowBool $ArchiveResults)"
 )
 if (![string]::IsNullOrWhiteSpace($TargetDate)) {
     $argsList += @("--field", "target_date=$TargetDate")

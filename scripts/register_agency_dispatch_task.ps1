@@ -24,10 +24,10 @@ if (!(Test-Path -LiteralPath $GhExe)) {
     throw "GitHub CLI not found: $GhExe"
 }
 
-$sendSummaryArg = if ($NoSummary) { '$false' } else { '$true' }
-$sendPodcastArg = if ($NoPodcast) { '$false' } else { '$true' }
-$includeWeatherArg = if ($NoWeatherInSummary) { '$false' } else { '$true' }
-$archiveResultsArg = if ($NoArchive) { '$false' } else { '$true' }
+$sendSummaryArg = if ($NoSummary) { 'false' } else { 'true' }
+$sendPodcastArg = if ($NoPodcast) { 'false' } else { 'true' }
+$includeWeatherArg = if ($NoWeatherInSummary) { 'false' } else { 'true' }
+$archiveResultsArg = if ($NoArchive) { 'false' } else { 'true' }
 
 $arguments = @(
     "-NoProfile",
