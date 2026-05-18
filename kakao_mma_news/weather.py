@@ -109,6 +109,15 @@ def _dust_clause(pm10: int | None, pm25: int | None) -> str:
     return f"{', '.join(dust_parts)} 수준이라"
 
 
+def _short_dust_clause(pm10: int | None, pm25: int | None) -> str:
+    dust_parts = []
+    if pm10 is not None:
+        dust_parts.append(f"미세먼지 {pm10}({_dust_grade_pm10(pm10)})")
+    if pm25 is not None:
+        dust_parts.append(f"초미세먼지 {pm25}({_dust_grade_pm25(pm25)})")
+    return ", ".join(dust_parts)
+
+
 def _worst_dust_grade(pm10: int | None, pm25: int | None) -> str:
     grades = []
     if pm10 is not None:
@@ -146,6 +155,16 @@ def _advice(temp_min: int | None, temp_max: int | None, rain_prob: int | None, d
     if temp_min is not None and temp_min <= 10:
         return "아침저녁으로 얇은 겉옷을 챙기고, 외출 전 최신 예보를 확인해 주세요."
     return "가볍게 겉옷을 챙기고, 외출 전 최신 예보를 확인해 주세요."
+
+
+def _short_advice(temp_max: int | None, rain_prob: int | None, dust_grade: str) -> str:
+    if rain_prob is not None and rain_prob >= 60:
+        return "우산을 챙겨 주세요."
+    if dust_grade in {"나쁨", "매우 나쁨"}:
+        return "장시간 외출은 조절해 주세요."
+    if temp_max is not None and temp_max >= 28:
+        return "수분을 챙겨 주세요."
+    return "외출 전 예보를 확인해 주세요."
 
 
 def build_weather_summary(config: Config) -> str:
@@ -199,11 +218,12 @@ def build_weather_summary(config: Config) -> str:
     weather_text = WEATHER_CODE_TEXT.get(weather_code or -1, "날씨")
     temp_clause = _temperature_clause(temp_min, temp_max)
     weather_clause = _weather_clause(weather_text, rain_prob)
-    dust_clause = _dust_clause(pm10, pm25)
     dust_grade = _worst_dust_grade(pm10, pm25)
-    outing_phrase = _outing_phrase(temp_max, rain_prob, dust_grade)
-    advice = _advice(temp_min, temp_max, rain_prob, dust_grade)
+    dust_clause = _short_dust_clause(pm10, pm25)
+    advice = _short_advice(temp_max, rain_prob, dust_grade)
 
+    rain_clause = f", 강수확률 {rain_prob}%" if rain_prob is not None and rain_prob >= 40 else ""
+    dust_sentence = f" {dust_clause}입니다." if dust_clause else ""
     if temp_clause:
-        return f"🌤️ 오늘 {location}은 {temp_clause}, {weather_clause}. {dust_clause} {outing_phrase}! {advice}"
-    return f"🌤️ 오늘 {location}은 {weather_clause}. {dust_clause} {outing_phrase}! {advice}"
+        return f"🌤️ 오늘 {location}은 최고 {temp_max}도, {weather_text}{rain_clause}입니다.{dust_sentence} {advice}"
+    return f"🌤️ 오늘 {location}은 {weather_text}{rain_clause}입니다.{dust_sentence} {advice}"

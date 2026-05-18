@@ -8,8 +8,10 @@ from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms
 from kakao_mma_news.summarize import (
     _load_json_object,
     _article_topic_key,
+    _fit_summary_for_kakao,
     _prepend_weather_summary,
     _render_codex_summary,
+    codex_article_payload,
     summarize_heuristic,
 )
 from kakao_mma_news.weather import build_weather_summary
@@ -126,6 +128,58 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("대경 병무청, 8월 입영 현역병 모집 접수", summary)
         self.assertIn("삼도동원훈련장 방문", summary)
 
+    def test_codex_payload_and_render_can_use_ten_items(self):
+        articles = [
+            Article(
+                f"삼성전자 테스트 기사 {idx}",
+                f"https://example.com/{idx}",
+                "example.com",
+                datetime(2026, 5, 17, tzinfo=timezone.utc),
+                f"삼성전자 테스트 요약 {idx}",
+                "test",
+            )
+            for idx in range(1, 25)
+        ]
+        payload = codex_article_payload(articles)
+        self.assertEqual(len(payload), 24)
+        data = {
+            "items": [
+                {
+                    "title": f"삼성전자 주요 기사 {idx}",
+                    "summary": f"삼성전자 관련 핵심 내용 {idx}입니다.",
+                    "opinion": "확인 포인트입니다.",
+                    "source": "example.com",
+                    "url": f"https://example.com/{idx}",
+                }
+                for idx in range(1, 12)
+            ],
+            "excluded_note": "",
+            "one_line": "삼성전자 관련 주요 흐름입니다.",
+        }
+        summary = _render_codex_summary(articles[0].published_date_kst, data, articles, "삼성전자")
+        self.assertEqual(summary.count("\n# "), 10)
+        self.assertIn("# 🔟 삼성전자 주요 기사 10", summary)
+        self.assertNotIn("삼성전자 주요 기사 11", summary)
+
+    def test_summary_fit_drops_opinion_first(self):
+        long_summary = "\n".join(
+            ["🪖 2026-05-17 삼성전자 뉴스 브리핑"]
+            + [
+                "\n".join(
+                    [
+                        f"# {idx}. 삼성전자 아주 긴 제목 {idx}",
+                        "삼성전자 관련 설명입니다. " * 10,
+                        "Opinion: 이 문장은 길이를 줄일 때 먼저 빠져야 합니다.",
+                        f"Source: example.com / https://example.com/{idx}",
+                    ]
+                )
+                for idx in range(1, 11)
+            ]
+        )
+        fitted = _fit_summary_for_kakao(long_summary, 1200)
+        self.assertLessEqual(len(fitted), 1200)
+        self.assertNotIn("Opinion:", fitted)
+
     def test_article_topic_key_for_known_duplicates(self):
         self.assertEqual(
             _article_topic_key("대경 병무청, 8월 입영 현역병 모집 접수", "현역병 모집 안내"),
@@ -183,11 +237,10 @@ class CoreTests(unittest.TestCase):
         with patch.dict("sys.modules", {"requests": FakeRequests}):
             summary = build_weather_summary(config)
 
-        self.assertIn("🌤️ 오늘 세종은 기온이 28도까지 오를 정도로 따뜻하고", summary)
-        self.assertIn("미세먼지 지수는 61 (보통)", summary)
-        self.assertIn("초미세먼지는 26 (보통)", summary)
-        self.assertIn("가벼운 외출에 딱 좋은 날이에요", summary)
-        self.assertIn("수분 충분히 챙기고", summary)
+        self.assertIn("🌤️ 오늘 세종은 최고 28도", summary)
+        self.assertIn("미세먼지 61(보통)", summary)
+        self.assertIn("초미세먼지 26(보통)", summary)
+        self.assertIn("수분을 챙겨 주세요", summary)
 
     def test_podcast_speech_cleans_markdown(self):
         speech = markdown_to_speech(

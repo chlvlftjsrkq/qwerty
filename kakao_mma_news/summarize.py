@@ -14,6 +14,9 @@ from .news import Article, normalize_space
 from .weather import build_weather_summary
 
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+CODEX_INPUT_ARTICLE_LIMIT = 24
+SUMMARY_ITEM_LIMIT = 10
+KAKAO_MESSAGE_SOFT_LIMIT = 2900
 
 
 def article_payload(articles: list[Article]) -> list[dict[str, str]]:
@@ -38,7 +41,7 @@ def article_payload(articles: list[Article]) -> list[dict[str, str]]:
     return payload
 
 
-def codex_article_payload(articles: list[Article], limit: int = 12) -> list[dict[str, str]]:
+def codex_article_payload(articles: list[Article], limit: int = CODEX_INPUT_ARTICLE_LIMIT) -> list[dict[str, str]]:
     payload = []
     for idx, article in enumerate(articles[:limit], start=1):
         published = (
@@ -195,8 +198,48 @@ def _prepend_weather_summary(summary: str, weather_summary: str) -> str:
     return "\n".join([lines[0], weather_summary, "", *lines[1:]])
 
 
+def _without_lines_starting(summary: str, prefixes: tuple[str, ...]) -> str:
+    return "\n".join(
+        line for line in summary.splitlines() if not line.startswith(prefixes)
+    )
+
+
+def _source_without_url(summary: str) -> str:
+    lines = []
+    for line in summary.splitlines():
+        if line.startswith("Source:") and " / " in line:
+            lines.append(line.split(" / ", 1)[0])
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _fit_summary_for_kakao(summary: str, max_chars: int = KAKAO_MESSAGE_SOFT_LIMIT) -> str:
+    if len(summary) <= max_chars:
+        return summary
+
+    compact = _without_lines_starting(summary, ("Opinion:",))
+    if len(compact) <= max_chars:
+        return compact
+
+    compact = _source_without_url(compact)
+    if len(compact) <= max_chars:
+        return compact
+
+    compact = _without_lines_starting(compact, ("Source:",))
+    if len(compact) <= max_chars:
+        return compact
+
+    compact = _without_lines_starting(compact, ("💡",))
+    if len(compact) <= max_chars:
+        return compact
+
+    notice = "\n\n요약이 길어 일부 세부 내용을 줄였습니다."
+    return compact[: max_chars - len(notice)].rstrip() + notice
+
+
 def _with_weather(config: Config, summary: str) -> str:
-    return _prepend_weather_summary(summary, build_weather_summary(config))
+    return _fit_summary_for_kakao(_prepend_weather_summary(summary, build_weather_summary(config)))
 
 
 def _load_json_object(raw_text: str) -> dict[str, Any]:
@@ -246,12 +289,12 @@ def _render_codex_summary(
     seen_topic_keys: set[str] = set()
     raw_items = data.get("items", [])
     if isinstance(raw_items, list):
-        for item in raw_items[:8]:
+        for item in raw_items[:SUMMARY_ITEM_LIMIT]:
             if not isinstance(item, dict):
                 continue
             title = _clean_title(item.get("title"))
-            summary = _clean_text(item.get("summary"), 360)
-            opinion = _clean_text(item.get("opinion"), 260)
+            summary = _clean_text(item.get("summary"), 150)
+            opinion = _clean_text(item.get("opinion"), 110)
             source = _clean_text(item.get("source"), 80) or "네이버 뉴스"
             url = _clean_text(item.get("url"), 500)
             if not title or not summary:
@@ -309,7 +352,7 @@ def _render_codex_summary(
             f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 {agency_name} 공식 안내를 한 번 더 확인해 주세요.",
         ]
     )
-    return "\n".join(lines)
+    return _fit_summary_for_kakao("\n".join(lines))
 
 
 def summarize_with_codex(config: Config, target_date: date, articles: list[Article]) -> str:
@@ -351,10 +394,10 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "If several articles cover the same event, keep only one representative item.",
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
-            "For each item summary, write one or two short polite spoken Korean sentences.",
+            "For each item summary, write one short polite spoken Korean sentence under 80 Korean characters.",
             "Do not mention ellipses, title-shortening marks, JSON, or formatting rules in excluded_note.",
             f'Required JSON schema: {{"items":[{{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
-            "items는 최대 8개만 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
+            "items는 가능하면 10개, 최대 10개까지 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]
     )
     output_file = tempfile.NamedTemporaryFile(
@@ -483,7 +526,7 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
         ]
         return "\n".join(lines)
 
-    top = articles[:8]
+    top = articles[:SUMMARY_ITEM_LIMIT]
     lines = [
         header,
         "---",
@@ -493,7 +536,7 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
 
     for idx, article in enumerate(top, start=1):
         number = NUMBER_EMOJI[idx - 1] if idx <= len(NUMBER_EMOJI) else f"{idx}."
-        summary = _trim_sentence(article.summary or article.title)
+        summary = _trim_sentence(article.summary or article.title, 150)
         lines.extend(
             [
                 f"# {number} {_clean_title(article.title)}",
@@ -520,7 +563,7 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
             f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 {agency_name} 공식 안내를 한 번 더 확인해 주세요.",
         ]
     )
-    return "\n".join(lines)
+    return _fit_summary_for_kakao("\n".join(lines))
 
 
 def build_summary(config: Config, target_date: date, articles: list[Article]) -> str:

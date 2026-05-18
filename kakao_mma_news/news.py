@@ -5,7 +5,7 @@ import html
 import json
 import re
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Iterable
@@ -311,6 +311,100 @@ def _collect_naver_news_proxy(config: Config, target_date: date | None = None) -
     return articles
 
 
+def _collect_naver_news_web_date_filter(config: Config, target_date: date) -> list[Article]:
+    import requests
+    from bs4 import BeautifulSoup
+
+    articles: list[Article] = []
+    target = target_date.strftime("%Y%m%d")
+    target_dot = target_date.strftime("%Y.%m.%d")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    page_count = max(1, min(config.naver_news_pages, 10))
+    for term in config.query_terms:
+        if len(term.strip()) < 2:
+            continue
+        records: dict[str, dict[str, str]] = {}
+        for page in range(page_count):
+            start = page * 10 + 1
+            response = requests.get(
+                "https://search.naver.com/search.naver",
+                params={
+                    "where": "news",
+                    "query": term,
+                    "sort": "1",
+                    "pd": "3",
+                    "ds": target_dot,
+                    "de": target_dot,
+                    "nso": f"so:dd,p:from{target}to{target},a:all",
+                    "start": start,
+                },
+                headers=headers,
+                timeout=config.request_timeout_seconds,
+            )
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            for link in soup.find_all("a", href=True):
+                href = canonical_url(link["href"])
+                parsed = urlparse(href)
+                if parsed.scheme not in {"http", "https"}:
+                    continue
+                if "search.naver.com" in parsed.netloc or "channelPromotion" in href:
+                    continue
+                title = normalize_space(link.get_text(" ", strip=True))
+                if len(title) < 8 or len(title) > 160:
+                    continue
+                if title.startswith("뉴스 기사와 댓글") or title.startswith("언론사 선정"):
+                    continue
+
+                context = ""
+                parent = link.parent
+                for _ in range(3):
+                    if not parent:
+                        break
+                    context = normalize_space(parent.get_text(" ", strip=True))
+                    if len(context) >= len(title) + 20:
+                        break
+                    parent = parent.parent
+
+                haystack = f"{title} {context}"
+                if config.required_terms and not any(required in haystack for required in config.required_terms):
+                    continue
+                if not any(query in haystack for query in config.query_terms):
+                    continue
+
+                host = parsed.netloc.lower()
+                if host.startswith("www."):
+                    host = host[4:]
+                record = records.setdefault(
+                    href,
+                    {"title": title, "summary": "", "url": href, "source": host or "네이버 뉴스"},
+                )
+                if context and context != title and len(context) > len(record["summary"]):
+                    record["summary"] = context
+
+        published = datetime.combine(target_date, time(12, 0), tzinfo=KST)
+        for record in records.values():
+            summary = record["summary"] or record["title"]
+            articles.append(
+                Article(
+                    title=record["title"],
+                    url=record["url"],
+                    source=record["source"],
+                    published_at=published,
+                    summary=summary,
+                    origin="naver_news_web_date",
+                )
+            )
+    return articles
+
+
 def collect_naver_news(config: Config, target_date: date | None = None) -> list[Article]:
     if not config.naver_news_enabled:
         return []
@@ -322,6 +416,37 @@ def collect_naver_news(config: Config, target_date: date | None = None) -> list[
     if config.naver_client_id and config.naver_client_secret:
         return _collect_naver_news_direct(config, target_date)
     return _collect_naver_news_proxy(config, target_date)
+
+
+def _filter_articles(articles: Iterable[Article], config: Config, target_date: date) -> list[Article]:
+    filtered: list[Article] = []
+    for article in dedupe_articles(articles):
+        if article.published_date_kst != target_date:
+            continue
+        if not matches_required_terms(article, config.required_terms):
+            continue
+        if relevance_score(article, config.query_terms) <= 0:
+            continue
+        if config.fetch_article_text:
+            article = Article(
+                title=article.title,
+                url=article.url,
+                source=article.source,
+                published_at=article.published_at,
+                summary=article.summary,
+                origin=article.origin,
+                content=fetch_article_text(article.url, config.request_timeout_seconds),
+            )
+        filtered.append(article)
+
+    filtered.sort(
+        key=lambda item: (
+            relevance_score(item, config.query_terms),
+            item.published_at or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
+    return filtered
 
 
 def fetch_article_text(url: str, timeout: float) -> str:
@@ -372,36 +497,17 @@ def collect_articles(config: Config, target_date: date) -> list[Article]:
         except Exception as exc:
             errors.append(f"{collector.__name__}: {exc}")
 
+    filtered = _filter_articles(articles, config, target_date)
+    if not filtered and config.naver_news_enabled:
+        try:
+            articles.extend(_collect_naver_news_web_date_filter(config, target_date))
+            filtered = _filter_articles(articles, config, target_date)
+        except Exception as exc:
+            errors.append(f"collect_naver_news_web_date_filter: {exc}")
+
     if errors and not articles:
         raise RuntimeError("뉴스 수집 실패: " + "; ".join(errors))
 
-    filtered: list[Article] = []
-    for article in dedupe_articles(articles):
-        if article.published_date_kst != target_date:
-            continue
-        if not matches_required_terms(article, config.required_terms):
-            continue
-        if relevance_score(article, config.query_terms) <= 0:
-            continue
-        if config.fetch_article_text:
-            article = Article(
-                title=article.title,
-                url=article.url,
-                source=article.source,
-                published_at=article.published_at,
-                summary=article.summary,
-                origin=article.origin,
-                content=fetch_article_text(article.url, config.request_timeout_seconds),
-            )
-        filtered.append(article)
-
-    filtered.sort(
-        key=lambda item: (
-            relevance_score(item, config.query_terms),
-            item.published_at or datetime.min.replace(tzinfo=timezone.utc),
-        ),
-        reverse=True,
-    )
     if errors:
         print("일부 뉴스 소스 수집 실패:", "; ".join(errors))
     return filtered[: config.max_items]
