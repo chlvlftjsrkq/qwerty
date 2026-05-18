@@ -210,6 +210,14 @@
       return new URLSearchParams(location.search).get("date");
     }
 
+    function versionedAsset(path, episode) {
+      if (!path) return "";
+      const version = episode.updated_at || episode.date || "";
+      if (!version) return path;
+      const separator = path.includes("?") ? "&" : "?";
+      return `${path}${separator}v=${encodeURIComponent(version)}`;
+    }
+
     function setEpisode(index) {
       if (!state.episodes.length) {
         title.textContent = "데이터 없음";
@@ -218,12 +226,13 @@
       }
       state.index = Math.max(0, Math.min(index, state.episodes.length - 1));
       const episode = state.episodes[state.index];
-      title.textContent = episode.title || `${episode.date} 병무청 뉴스 브리핑`;
-      description.textContent = episode.description || "네이버 뉴스 기준 병무청 관련 음성 요약";
+      title.textContent = episode.title || `${episode.date} 기관 뉴스 브리핑`;
+      description.textContent = episode.description || "네이버 뉴스 기준 기관별 음성 요약";
+      const audioUrl = versionedAsset(episode.audio, episode);
       audio.pause();
-      audio.src = episode.audio;
+      audio.src = audioUrl;
       audio.load();
-      download.href = episode.audio;
+      download.href = audioUrl;
       download.download = `${episode.date}.mp3`;
       progress.value = 0;
       current.textContent = "00:00";

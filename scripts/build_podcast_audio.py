@@ -451,6 +451,8 @@ async def build() -> int:
     script_path.write_text(speech_text, encoding="utf-8")
 
     audio_path = audio_dir / f"{episode_id}.mp3"
+    if audio_path.exists():
+        audio_path.unlink()
     if args.provider == "edge":
         await synthesize_edge(speech_text, audio_path, args.voice, args.rate, args.pitch)
 
@@ -462,6 +464,7 @@ async def build() -> int:
         "audio": f"audio/{episode_id}.mp3",
         "script": f"scripts/{episode_id}.txt",
         "summary": f"../summaries/summary-{episode_id}.md",
+        "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
     update_manifest(manifest_path, episode)
 
