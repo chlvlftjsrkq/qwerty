@@ -81,6 +81,10 @@ jobs:
           $agencyInput = "$env:AGENCY_NAME_INPUT".Trim()
           $indexInput = "$env:AGENCY_INDEX_INPUT".Trim()
           $selectedIndex = -1
+          $cronAgencyName = ""
+          $cronWeatherLocation = ""
+          $cronWeatherLatitude = ""
+          $cronWeatherLongitude = ""
 
           if (![string]::IsNullOrWhiteSpace($agencyInput)) {
             for ($i = 0; $i -lt $agencies.Count; $i++) {
@@ -96,16 +100,10 @@ jobs:
             $selectedIndex = [int]$indexInput
             $selectedIndex = (($selectedIndex % $agencies.Count) + $agencies.Count) % $agencies.Count
           } elseif ($env:GITHUB_EVENT_NAME -eq "schedule") {
-            $cronAgencyName = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("67OR66y07LKt"))
-            for ($i = 0; $i -lt $agencies.Count; $i++) {
-              if ($agencies[$i].agency -eq $cronAgencyName) {
-                $selectedIndex = $i
-                break
-              }
-            }
-            if ($selectedIndex -lt 0) {
-              throw "Backup cron agency was not found."
-            }
+            $cronAgencyName = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("7IK87ISx7KCE7J6Q"))
+            $cronWeatherLocation = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("7IiY7JuQ"))
+            $cronWeatherLatitude = "37.2636"
+            $cronWeatherLongitude = "127.0286"
           } else {
             $kst = [System.TimeZoneInfo]::FindSystemTimeZoneById("Korea Standard Time")
             $nowKst = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $kst)
@@ -121,8 +119,20 @@ jobs:
             }
           }
 
-          $selected = $agencies[$selectedIndex]
-          $agencyName = [string]$selected.agency
+          if ($selectedIndex -ge 0) {
+            $selected = $agencies[$selectedIndex]
+            $agencyName = [string]$selected.agency
+            $weatherLocation = [string]$selected.weather_location
+            $weatherLatitude = [string]$selected.weather_latitude
+            $weatherLongitude = [string]$selected.weather_longitude
+          } elseif (![string]::IsNullOrWhiteSpace($cronAgencyName)) {
+            $agencyName = $cronAgencyName
+            $weatherLocation = $cronWeatherLocation
+            $weatherLatitude = $cronWeatherLatitude
+            $weatherLongitude = $cronWeatherLongitude
+          } else {
+            throw "No agency target was selected."
+          }
           $triggerSource = "$env:TRIGGER_SOURCE_INPUT".Trim()
           if ([string]::IsNullOrWhiteSpace($triggerSource)) {
             if ($env:GITHUB_EVENT_NAME -eq "schedule") {
@@ -158,9 +168,9 @@ jobs:
             "NEWS_REQUIRED_TERMS=$agencyName",
             "TRIGGER_SOURCE=$triggerSource",
             "WEATHER_ENABLED=$includeWeather",
-            "WEATHER_LOCATION=$($selected.weather_location)",
-            "WEATHER_LATITUDE=$($selected.weather_latitude)",
-            "WEATHER_LONGITUDE=$($selected.weather_longitude)"
+            "WEATHER_LOCATION=$weatherLocation",
+            "WEATHER_LATITUDE=$weatherLatitude",
+            "WEATHER_LONGITUDE=$weatherLongitude"
           )
           foreach ($line in $envLines) {
             Add-Content -Path $env:GITHUB_ENV -Value $line -Encoding UTF8
@@ -177,7 +187,7 @@ jobs:
           Write-Host "Trigger source: $triggerSource"
           Write-Host "Target date: $targetDate"
           Write-Host "Episode id: $episodeId"
-          Write-Host "Weather location: $($selected.weather_location)"
+          Write-Host "Weather location: $weatherLocation"
 
       - name: Verify local Python
         shell: powershell
