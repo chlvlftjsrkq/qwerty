@@ -252,6 +252,17 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("주요 내용은 대구경북지방병무청은", speech)
         self.assertIn("자세한 내용과 개인별 적용 조건", speech)
 
+    def test_podcast_speech_polishes_company_symbols(self):
+        speech = markdown_to_speech(
+            "🪖 2026-05-17 삼성전자 뉴스 브리핑\n"
+            "# 1️⃣ 삼전 노조 지휘부 수당 ‘月 500만원’ 논란\n"
+            "DX 부문 제1노조가 영업이익 n% 성과급을 요구했습니다.\n",
+            "2026-05-17",
+        )
+        self.assertIn("월 500 만원", speech)
+        self.assertIn("디 엑스 부문 제1 노조", speech)
+        self.assertIn("영업이익 엔 퍼센트 성과급", speech)
+
     def test_podcast_no_article_message_is_exact(self):
         speech = markdown_to_speech(
             "🪖 2026-03-31 병무청 뉴스 브리핑\n확인된 주요 뉴스가 없습니다.",
