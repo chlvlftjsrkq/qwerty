@@ -257,7 +257,7 @@ def spoken_title(title: str) -> str:
     title = re.sub(r"[\[\]\"'“”‘’]", "", title)
     if not title:
         return ""
-    return f"제목은 {title}입니다."
+    return ensure_title_ending(title)
 
 
 def extract_weather(summary: str) -> str:
@@ -340,7 +340,7 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
             continue
         candidate = (
             f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. "
-            f"{spoken_title(title)} 주요 내용입니다. {polish_korean_text(body)}"
+            f"{spoken_title(title)} {polish_korean_text(body)}"
         )
         projected = len("\n".join([*lines, candidate]))
         if lines and projected > max_chars:

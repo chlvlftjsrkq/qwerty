@@ -206,10 +206,12 @@ class CoreTests(unittest.TestCase):
         self.assertIn("2026 년 5 월 16 일 기관 뉴스 음성 브리핑입니다.", speech)
         self.assertIn("오늘은 주요 기사 1 건을 제목과 핵심 내용 중심으로 전해드리겠습니다.", speech)
         self.assertIn(
-            "첫 번째 소식입니다. 제목은 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사입니다.",
+            "첫 번째 소식입니다. 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사.",
             speech,
         )
-        self.assertIn("주요 내용입니다. 병무청이 공공데이터 행사를 열었습니다.", speech)
+        self.assertIn("병무청이 공공데이터 행사를 열었습니다.", speech)
+        self.assertNotIn("제목은", speech)
+        self.assertNotIn("주요 내용입니다", speech)
         self.assertIn("에이 아이 활용 계획은 5 건입니다.", speech)
         self.assertNotIn("공식 안내 확인이 필요하다", speech)
         self.assertNotIn("들어가면 안 된다", speech)
@@ -245,7 +247,8 @@ class CoreTests(unittest.TestCase):
         self.assertIn("대구경북지방병무청이 행사를 열었습니다.", speech)
         self.assertNotIn("대구, 경북지방병무청", speech)
         self.assertIn("5 개 자치구", speech)
-        self.assertIn("주요 내용입니다.", speech)
+        self.assertNotIn("제목은", speech)
+        self.assertNotIn("주요 내용입니다", speech)
         self.assertNotIn("주요 내용은 대구경북지방병무청은", speech)
         self.assertIn("자세한 내용과 개인별 적용 조건", speech)
 
