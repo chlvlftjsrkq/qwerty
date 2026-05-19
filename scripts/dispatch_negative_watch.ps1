@@ -3,7 +3,7 @@ param(
     [string]$Workflow = "negative-news-watch.yml",
     [string]$Ref = "main",
     [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe",
-    [string]$TargetChatroom = "test",
+    [string]$TargetChatroom = "",
     [int]$MaxAlerts = 1,
     [int]$LookbackHours = 168,
     [int]$TopicTtlHours = 12,
@@ -12,10 +12,15 @@ param(
     [int]$ActiveStartHour = 8,
     [int]$ActiveEndHour = 22,
     [string]$DryRun = "false",
-    [string]$TriggerSource = "pc-negative-watch-5min-test"
+    [string]$TriggerSource = "pc-negative-watch-main"
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-DefaultTargetChatroom {
+    $codes = @(0x0041, 0x0049, 0x0020, 0xBCD1, 0xBB34, 0xCCAD, 0x0020, 0xB370, 0xC77C, 0xB9AC, 0x0020, 0xBAA8, 0xB2DD, 0xD1A1)
+    return -join ($codes | ForEach-Object { [char]$_ })
+}
 
 function Convert-ToWorkflowBool {
     param([string]$Value)
@@ -29,6 +34,9 @@ function Convert-ToWorkflowBool {
 $Root = Split-Path -Parent $PSScriptRoot
 if (!(Test-Path -LiteralPath $GhExe)) {
     throw "GitHub CLI was not found: $GhExe"
+}
+if ([string]::IsNullOrWhiteSpace($TargetChatroom)) {
+    $TargetChatroom = Get-DefaultTargetChatroom
 }
 
 $argsList = @(

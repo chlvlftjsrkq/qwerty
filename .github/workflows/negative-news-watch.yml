@@ -6,13 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       trigger_source:
-        description: "Execution source, for example pc-negative-watch-5min-test."
+        description: "Execution source, for example pc-negative-watch-main."
         required: false
         default: ""
       target_chatroom:
         description: "KakaoTalk room to receive alerts."
         required: false
-        default: "test"
+        default: "AI 병무청 데일리 모닝톡"
       max_alerts:
         description: "Maximum alert messages to send in one run."
         required: false
@@ -59,9 +59,9 @@ jobs:
       cancel-in-progress: false
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
-      TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || 'test' }}
-      NEGATIVE_WATCH_STATE: C:\omx\qwerty\.scheduler\negative-news-watch-seen.json
-      NEGATIVE_WATCH_OUTPUT_DIR: runs\negative-watch
+      TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || 'AI 병무청 데일리 모닝톡' }}
+      NEGATIVE_WATCH_STATE: C:\omx\qwerty\.scheduler\negative-news-watch-main-seen.json
+      NEGATIVE_WATCH_OUTPUT_DIR: runs\negative-watch-main
     steps:
       - uses: actions/checkout@v4
 
@@ -81,11 +81,15 @@ jobs:
         env:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
           CODEX_COMMAND: ${{ vars.CODEX_COMMAND || 'C:\Users\April\AppData\Roaming\npm\codex.cmd' }}
           CODEX_MODEL: ${{ vars.CODEX_MODEL || '' }}
           CODEX_TIMEOUT_SECONDS: ${{ vars.CODEX_TIMEOUT_SECONDS || '120' }}
           NEGATIVE_WATCH_SUMMARY_PROVIDER: ${{ vars.NEGATIVE_WATCH_SUMMARY_PROVIDER || 'codex' }}
+          NEGATIVE_WATCH_IMAGE_MODEL: ${{ vars.NEGATIVE_WATCH_IMAGE_MODEL || 'gpt-image-1-mini' }}
+          NEGATIVE_WATCH_IMAGE_QUALITY: ${{ vars.NEGATIVE_WATCH_IMAGE_QUALITY || 'medium' }}
+          NEGATIVE_WATCH_IMAGE_SIZE: ${{ vars.NEGATIVE_WATCH_IMAGE_SIZE || '1024x1024' }}
           MAX_ALERTS_INPUT: ${{ github.event.inputs.max_alerts || '1' }}
           LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '168' }}
           TOPIC_TTL_HOURS_INPUT: ${{ github.event.inputs.topic_ttl_hours || '12' }}
@@ -105,6 +109,7 @@ jobs:
             "--room", "$env:TARGET_CHATROOM",
             "--state", "$env:NEGATIVE_WATCH_STATE",
             "--output-dir", "$env:NEGATIVE_WATCH_OUTPUT_DIR",
+            "--generate-alert-image",
             "--max-alerts", "$env:MAX_ALERTS_INPUT",
             "--lookback-hours", "$env:LOOKBACK_HOURS_INPUT",
             "--topic-ttl-hours", "$env:TOPIC_TTL_HOURS_INPUT",

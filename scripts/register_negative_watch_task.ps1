@@ -1,11 +1,11 @@
 param(
-    [string]$TaskName = "Qwerty Negative MMA News Watch 5min Test",
-    [int]$IntervalMinutes = 5,
+    [string]$TaskName = "Qwerty Negative MMA News Watch",
+    [int]$IntervalMinutes = 15,
     [string]$Repo = "chlvlftjsrkq/qwerty",
     [string]$Workflow = "negative-news-watch.yml",
     [string]$Ref = "main",
     [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe",
-    [string]$TargetChatroom = "test",
+    [string]$TargetChatroom = "",
     [int]$MaxAlerts = 1,
     [int]$LookbackHours = 168,
     [int]$TopicTtlHours = 12,
@@ -19,6 +19,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-DefaultTargetChatroom {
+    $codes = @(0x0041, 0x0049, 0x0020, 0xBCD1, 0xBB34, 0xCCAD, 0x0020, 0xB370, 0xC77C, 0xB9AC, 0x0020, 0xBAA8, 0xB2DD, 0xD1A1)
+    return -join ($codes | ForEach-Object { [char]$_ })
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 $DispatchScript = Join-Path $Root "scripts\dispatch_negative_watch.ps1"
 if (!(Test-Path -LiteralPath $DispatchScript)) {
@@ -26,6 +31,9 @@ if (!(Test-Path -LiteralPath $DispatchScript)) {
 }
 if (!(Test-Path -LiteralPath $GhExe)) {
     throw "GitHub CLI not found: $GhExe"
+}
+if ([string]::IsNullOrWhiteSpace($TargetChatroom)) {
+    $TargetChatroom = Get-DefaultTargetChatroom
 }
 
 $dryRunValue = if ($DryRun) { "true" } else { "false" }
@@ -46,7 +54,7 @@ $arguments = @(
     "-ActiveStartHour", "$ActiveStartHour",
     "-ActiveEndHour", "$ActiveEndHour",
     "-DryRun", "$dryRunValue",
-    "-TriggerSource", "pc-negative-watch-5min-test"
+    "-TriggerSource", "pc-negative-watch-main"
 )
 
 $startHour = (($ActiveStartHour % 24) + 24) % 24

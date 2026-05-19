@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import html
 import json
@@ -742,6 +743,94 @@ def related_link_lines(items: list[NewsItem]) -> list[str]:
     return lines
 
 
+def build_alert_image_prompt(
+    item: NewsItem,
+    classification: Classification,
+    related_items: list[NewsItem],
+) -> str:
+    related_titles = "; ".join(clean_text(related.title) for related in related_items[:3])
+    details = [
+        f"Article title: {clean_text(item.title)}",
+        f"Category: {clean_text(classification.category)}",
+        f"Severity: {clean_text(classification.severity)}",
+        f"Summary: {clean_text(classification.summary)}",
+        f"Reason: {clean_text(classification.reason)}",
+    ]
+    if related_titles:
+        details.append(f"Related titles: {related_titles}")
+
+    return "\n".join(
+        [
+            "Create a square, high-impact editorial illustration for a Korean KakaoTalk news alert.",
+            "Use the article details below as visual inspiration, but do not quote or reproduce the article.",
+            "",
+            *details,
+            "",
+            "Visual direction:",
+            "- Make it feel immediately connected to a celebrity military-service controversy without depicting any real person.",
+            "- Use strong symbolic elements: anonymous performer silhouette, microphone, smartphone live broadcast, camera flashes, social media alert bubbles, military-service or medical-check papers, court document or gavel.",
+            "- If the article mentions dental treatment, teeth, extraction, or a similar controversy, include a dramatic dental X-ray or molar symbol as a visual clue.",
+            "- Keep the face hidden or fully generic. No real-person likeness, no celebrity name, no logos, no defamatory labels.",
+            "- Serious Korean breaking-news mood, cinematic lighting, navy/black/white palette with red alert accents.",
+            "- Readable as a phone thumbnail. Professional, polished, not cartoonish.",
+            "- Avoid gibberish text. Generic short labels like LIVE or NEWS are okay.",
+        ]
+    )
+
+
+def generate_alert_image(
+    item: NewsItem,
+    classification: Classification,
+    related_items: list[NewsItem],
+    *,
+    output_path: Path,
+    api_key: str,
+    model: str,
+    size: str,
+    quality: str,
+    timeout_seconds: float,
+) -> Path:
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is required to generate an alert image.")
+
+    prompt = build_alert_image_prompt(item, classification, related_items)
+    response = requests.post(
+        "https://api.openai.com/v1/images/generations",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "prompt": prompt,
+            "size": size,
+            "quality": quality,
+            "n": 1,
+            "output_format": "png",
+        },
+        timeout=timeout_seconds,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"OpenAI image generation failed: {response.status_code} {response.text[:1000]}")
+
+    data = response.json()
+    images = data.get("data") or []
+    if not images:
+        raise RuntimeError("OpenAI image generation returned no image data.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    first = images[0]
+    if first.get("b64_json"):
+        output_path.write_bytes(base64.b64decode(first["b64_json"]))
+    elif first.get("url"):
+        image_response = requests.get(first["url"], timeout=timeout_seconds)
+        image_response.raise_for_status()
+        output_path.write_bytes(image_response.content)
+    else:
+        raise RuntimeError("OpenAI image generation response had neither b64_json nor url.")
+    return output_path
+
+
 def build_alert_message(
     item: NewsItem,
     classification: Classification,
@@ -849,11 +938,59 @@ def post_to_kakao(message: str, *, room: str, mcp_command: str, verify: bool) ->
             pass
 
 
+def post_image_to_kakao(
+    image_path: Path,
+    *,
+    room: str,
+    open_wait: float,
+    send_wait: float,
+) -> None:
+    if not image_path.exists():
+        raise FileNotFoundError(f"Kakao alert image was not found: {image_path}")
+
+    command = [
+        sys.executable,
+        str(ROOT_DIR / "scripts" / "post_kakao_image_attach.py"),
+        "--room",
+        room,
+        "--image",
+        str(image_path),
+        "--open-wait",
+        str(open_wait),
+        "--send-wait",
+        str(send_wait),
+    ]
+    result = subprocess.run(
+        command,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = "\n".join(
+            part.strip()
+            for part in [result.stdout[-2000:], result.stderr[-2000:]]
+            if part.strip()
+        )
+        raise RuntimeError(f"Kakao image post failed with exit {result.returncode}: {details}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Watch Naver news for negative MMA-related issues.")
-    parser.add_argument("--room", default=os.getenv("TARGET_CHATROOM", "test"), help="KakaoTalk room title")
+    parser.add_argument("--room", default=os.getenv("TARGET_CHATROOM", "AI 병무청 데일리 모닝톡"), help="KakaoTalk room title")
     parser.add_argument("--state", default=os.getenv("NEGATIVE_WATCH_STATE", ".scheduler/negative-news-seen.json"))
     parser.add_argument("--output-dir", default=os.getenv("NEGATIVE_WATCH_OUTPUT_DIR", "runs/negative-watch"))
+    parser.add_argument("--alert-image", default=os.getenv("NEGATIVE_WATCH_ALERT_IMAGE", ""))
+    parser.add_argument("--generate-alert-image", action="store_true", default=os.getenv("NEGATIVE_WATCH_GENERATE_IMAGE", "").strip().lower() in {"1", "true", "yes", "y", "on"})
+    parser.add_argument("--image-model", default=os.getenv("NEGATIVE_WATCH_IMAGE_MODEL", "gpt-image-1-mini"))
+    parser.add_argument("--image-size", default=os.getenv("NEGATIVE_WATCH_IMAGE_SIZE", "1024x1024"))
+    parser.add_argument("--image-quality", default=os.getenv("NEGATIVE_WATCH_IMAGE_QUALITY", "medium"))
+    parser.add_argument("--image-timeout-seconds", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_TIMEOUT_SECONDS", "180")))
+    parser.add_argument("--image-open-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_OPEN_WAIT", "1.5")))
+    parser.add_argument("--image-send-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_SEND_WAIT", "5.0")))
     parser.add_argument("--queries", default=os.getenv("NEGATIVE_WATCH_QUERIES", ""))
     parser.add_argument("--display", type=int, default=int(os.getenv("NEGATIVE_WATCH_DISPLAY", "50")))
     parser.add_argument("--pages", type=int, default=int(os.getenv("NEGATIVE_WATCH_PAGES", "2")))
@@ -875,6 +1012,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-provider", default=os.getenv("NEGATIVE_WATCH_SUMMARY_PROVIDER", "codex"))
     parser.add_argument("--naver-client-id", default=os.getenv("NAVER_CLIENT_ID", ""))
     parser.add_argument("--naver-client-secret", default=os.getenv("NAVER_CLIENT_SECRET", ""))
+    parser.add_argument("--openai-api-key", default=os.getenv("OPENAI_API_KEY", ""))
     parser.add_argument("--proxy-base-url", default=os.getenv("KSKILL_PROXY_BASE_URL", "https://k-skill-proxy.nomadamas.org"))
     parser.add_argument("--timeout-seconds", type=float, default=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "15")))
     return parser.parse_args()
@@ -1078,8 +1216,34 @@ def main() -> int:
     )
 
     posted = 0
+    alert_image_paths: list[str] = []
     if not args.dry_run:
-        for message in messages:
+        static_alert_image = Path(args.alert_image) if args.alert_image else None
+        if static_alert_image is not None and not static_alert_image.is_absolute():
+            static_alert_image = ROOT_DIR / static_alert_image
+        for index, ((item, classification, topic_key), message) in enumerate(zip(alerts, messages), start=1):
+            related_items = related_by_topic.get(topic_key, [])
+            alert_image = static_alert_image
+            if args.generate_alert_image:
+                alert_image = generate_alert_image(
+                    item,
+                    classification,
+                    related_items,
+                    output_path=output_dir / f"negative-alert-image-{timestamp}-{index:02d}.png",
+                    api_key=args.openai_api_key,
+                    model=args.image_model,
+                    size=args.image_size,
+                    quality=args.image_quality,
+                    timeout_seconds=args.image_timeout_seconds,
+                )
+                alert_image_paths.append(str(alert_image))
+            if alert_image is not None:
+                post_image_to_kakao(
+                    alert_image,
+                    room=args.room,
+                    open_wait=args.image_open_wait,
+                    send_wait=args.image_send_wait,
+                )
             post_to_kakao(message, room=args.room, mcp_command=args.mcp_command, verify=args.verify)
             posted += 1
 
@@ -1126,6 +1290,7 @@ def main() -> int:
                 "candidate_path": str(candidates_path),
                 "alert_count": len(alerts),
                 "posted": posted,
+                "generated_alert_images": alert_image_paths,
                 "errors": errors,
             },
             ensure_ascii=False,
