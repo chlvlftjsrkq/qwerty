@@ -18,8 +18,10 @@ from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import markdown_to_speech
 from scripts.watch_negative_news import (
     NewsItem,
+    article_source_supports_issue,
     build_alert_message,
     classify_heuristic,
+    has_core_issue_relevance,
     in_active_window,
     topic_fingerprint,
 )
@@ -375,6 +377,33 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 21, 59, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 0, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 7, 59, tzinfo=timezone.utc), 8, 22))
+
+    def test_negative_watch_rejects_mismatched_naver_snippet(self):
+        item = NewsItem(
+            title="이정부 통일백서 남북 두 국가 명시 논란 일파만파",
+            url="https://example.com/politics",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T16:30:00+09:00",
+            summary="전날 MC몽은 자신을 둘러싼 병역 비리와 불법 도박 의혹을 부인했다.",
+            query="병역비리",
+        )
+        self.assertFalse(has_core_issue_relevance(item.title))
+        with patch("scripts.watch_negative_news.fetch_article_meta_text", return_value="통일백서 남북 두 국가 논란 정치 기사"):
+            self.assertFalse(article_source_supports_issue(item, 1))
+
+    def test_negative_watch_accepts_source_meta_with_core_issue(self):
+        item = NewsItem(
+            title="MC몽 실명 폭로 후 계정 정지",
+            url="https://example.com/entertainment",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T16:30:00+09:00",
+            summary="MC몽이 병역 기피 의혹을 해명했다.",
+            query="병역비리",
+        )
+        with patch("scripts.watch_negative_news.fetch_article_meta_text", return_value="MC몽 병역 기피 의혹 해명 기사"):
+            self.assertTrue(article_source_supports_issue(item, 1))
 
     def test_negative_watch_alert_includes_related_links(self):
         representative = NewsItem(

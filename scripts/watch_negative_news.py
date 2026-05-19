@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
+from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
@@ -83,6 +84,28 @@ CONTEXT_TERMS = {
     "사회복무요원": 2,
     "공익": 1,
 }
+
+CORE_ISSUE_RELEVANCE_TERMS = (
+    "병무청",
+    "병역",
+    "병역비리",
+    "병역 비리",
+    "병역기피",
+    "병역 기피",
+    "병역법",
+    "병역판정",
+    "병역 판정",
+    "군면제",
+    "군 면제",
+    "허위진단서",
+    "허위 진단서",
+    "사회복무요원",
+    "공익",
+    "특별사법경찰",
+    "고의발치",
+    "발치",
+    "치아",
+)
 
 SOFT_EXCLUDE_TERMS = [
     "입영문화제",
@@ -218,6 +241,56 @@ def source_from_url(url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host or "naver-news"
+
+
+def has_core_issue_relevance(text: str) -> bool:
+    folded = clean_text(text).casefold()
+    return any(term.casefold() in folded for term in CORE_ISSUE_RELEVANCE_TERMS)
+
+
+def fetch_article_meta_text(url: str, timeout: float) -> str:
+    if not url:
+        return ""
+    response = requests.get(
+        url,
+        timeout=timeout,
+        headers={
+            "User-Agent": "qwerty-negative-news-watch/0.1",
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+    )
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+    parts: list[str] = []
+    if soup.title:
+        parts.append(soup.title.get_text(" ", strip=True))
+    selectors = [
+        ("property", "og:title"),
+        ("property", "og:description"),
+        ("name", "title"),
+        ("name", "description"),
+        ("name", "twitter:title"),
+        ("name", "twitter:description"),
+    ]
+    for key, value in selectors:
+        tag = soup.find("meta", attrs={key: value})
+        content = clean_text(tag.get("content", "")) if tag else ""
+        if content:
+            parts.append(content)
+    return clean_text(" ".join(parts))
+
+
+def article_source_supports_issue(item: NewsItem, timeout: float) -> bool:
+    # Naver snippets can occasionally combine one page title with another news
+    # blurb. Trust summary text only after the source page itself supports the
+    # military-service issue context.
+    if has_core_issue_relevance(item.title):
+        return True
+    try:
+        meta_text = fetch_article_meta_text(item.url or item.naver_url, timeout)
+    except Exception:
+        return False
+    return has_core_issue_relevance(meta_text)
 
 
 def fetch_naver_news(
@@ -1325,13 +1398,28 @@ def main() -> int:
         classifications[key] = classification
         return classification
 
+    source_relevance_cache: dict[str, bool] = {}
+
+    def source_supports_cached(item: NewsItem) -> bool:
+        key = item_key(item)
+        cached = source_relevance_cache.get(key)
+        if cached is not None:
+            return cached
+        supported = article_source_supports_issue(item, args.timeout_seconds)
+        source_relevance_cache[key] = supported
+        return supported
+
     raw_pairs: list[tuple[NewsItem, Classification, str]] = []
     inspected_keys: list[str] = []
+    source_relevance_reject_count = 0
     for item in new_items:
         classification = classify_cached(item)
         if classification.score <= 0:
             continue
         inspected_keys.append(item_key(item))
+        if classification.score >= 5 and not source_supports_cached(item):
+            source_relevance_reject_count += 1
+            continue
         raw_pairs.append((item, classification, topic_fingerprint(item, classification)))
 
     raw_pairs.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
@@ -1366,8 +1454,9 @@ def main() -> int:
 
     classified.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
     alerts = classified[: max(0, args.max_alerts)]
-    related_by_topic = {
-        topic_key: related_articles_for_topic(
+    related_by_topic = {}
+    for item, _classification, topic_key in alerts:
+        related_candidates = related_articles_for_topic(
             topic_key,
             item,
             items,
@@ -1376,8 +1465,9 @@ def main() -> int:
             args.related_hours,
             args.related_limit,
         )
-        for item, _classification, topic_key in alerts
-    }
+        related_by_topic[topic_key] = [
+            related for related in related_candidates if source_supports_cached(related)
+        ][: args.related_limit]
     messages = [
         build_alert_message(
             item,
@@ -1400,6 +1490,7 @@ def main() -> int:
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
                 "topic_duplicate_count": topic_duplicate_count,
+                "source_relevance_reject_count": source_relevance_reject_count,
                 "seen_topic_count": len(seen_topics),
                 "alert_count": len(alerts),
                 "alerts": [
