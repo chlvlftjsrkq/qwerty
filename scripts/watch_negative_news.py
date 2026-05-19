@@ -303,8 +303,8 @@ def classify_heuristic(item: NewsItem) -> Classification:
     else:
         category = "병무청 평판 리스크"
 
-    summary = item.summary or item.title
-    reason = "감지어: " + ", ".join(matched[:6]) if matched else "부정 이슈 감지 기준에 걸렸습니다."
+    summary = heuristic_alert_summary(item, category, matched)
+    reason = alert_reason_sentence(matched)
     return Classification(
         send=send,
         severity=severity,
@@ -314,6 +314,88 @@ def classify_heuristic(item: NewsItem) -> Classification:
         score=score,
         matched_terms=matched,
     )
+
+
+def remove_korean_particle_spacing(text: str) -> str:
+    particles = [
+        "으로부터",
+        "으로서",
+        "으로써",
+        "까지",
+        "부터",
+        "보다",
+        "처럼",
+        "에게",
+        "에서",
+        "으로",
+        "라고",
+        "하고",
+        "이며",
+        "이고",
+        "이나",
+        "거나",
+        "의",
+        "은",
+        "는",
+        "이",
+        "가",
+        "을",
+        "를",
+        "에",
+        "와",
+        "과",
+        "도",
+        "만",
+        "로",
+    ]
+    for particle in particles:
+        text = re.sub(rf"(?<=[가-힣A-Za-z0-9])\s+{particle}(?=[\s.,!?)]|$)", particle, text)
+    return text
+
+
+def compact_terms(terms: list[str], limit: int = 4) -> str:
+    unique: list[str] = []
+    for term in terms:
+        if term not in unique:
+            unique.append(term)
+    selected = unique[:limit]
+    if not selected:
+        return ""
+    if len(selected) == 1:
+        return selected[0]
+    return ", ".join(selected[:-1]) + ", " + selected[-1]
+
+
+def trim_to_natural_sentence(text: str, limit: int = 150) -> str:
+    cleaned = remove_korean_particle_spacing(clean_text(text))
+    if len(cleaned) <= limit and re.search(r"[.!?다요죠니다습니다]$", cleaned):
+        return cleaned
+
+    sentence_match = re.match(r"^(.{20,}?[.!?])\s", cleaned + " ")
+    if sentence_match and len(sentence_match.group(1)) <= limit:
+        return sentence_match.group(1).strip()
+
+    shortened = cleaned[:limit].rstrip(" ,.;:!?")
+    shortened = re.sub(r"\s+\S{0,8}$", "", shortened).rstrip(" ,.;:!?")
+    return shortened
+
+
+def heuristic_alert_summary(item: NewsItem, category: str, matched_terms: list[str]) -> str:
+    source = item.source or "네이버 뉴스"
+    snippet = trim_to_natural_sentence(item.summary or item.title, 135)
+    if snippet and snippet != item.title:
+        return f"{source}에서 '{item.title}' 관련 보도를 냈습니다. 기사에서는 {snippet} 등의 내용을 다루고 있습니다."
+    terms = compact_terms(matched_terms, 3)
+    if terms:
+        return f"{source}에서 '{item.title}' 보도를 냈습니다. {terms} 표현이 함께 확인돼 {category}로 분류했습니다."
+    return f"{source}에서 '{item.title}' 보도를 냈습니다. 병역 관련 부정 이슈로 번질 가능성이 있어 확인 대상으로 분류했습니다."
+
+
+def alert_reason_sentence(matched_terms: list[str]) -> str:
+    terms = compact_terms(matched_terms, 5)
+    if not terms:
+        return "기사 제목과 요약이 병무청 관련 부정 이슈 감지 기준에 걸려 확인 대상으로 잡았습니다."
+    return f"기사 제목과 요약에서 {terms} 표현이 함께 확인돼 모니터링 대상으로 잡았습니다."
 
 
 def load_json_object(text: str) -> dict[str, Any]:
@@ -391,8 +473,11 @@ def refine_with_codex(
             "Read only this JSON file:",
             str(input_path.resolve()),
             "Return exactly one valid JSON object, no Markdown.",
-            'Schema: {"send":true,"severity":"높음|보통|낮음","category":"분류","summary":"카카오톡에 넣을 1~2문장 경어체 요약","reason":"왜 알림 대상인지 한 문장"}',
-            "Write Korean politely and clearly. Do not use ellipses or unsupported facts.",
+            'Schema: {"send":true,"severity":"높음|보통|낮음","category":"분류","summary":"카카오톡에 넣을 자연스러운 경어체 요약 1~2문장","reason":"왜 확인 대상으로 잡았는지 자연스러운 한 문장"}',
+            "Write like a concise Korean newsroom monitor alert, not a system log.",
+            "Do not copy a clipped Naver API description verbatim. Rewrite it as a complete natural sentence.",
+            "Do not use labels such as 감지어 in reason. Explain the monitoring reason in plain Korean.",
+            "Do not use ellipses or unsupported facts.",
         ]
     )
     command = [
@@ -456,24 +541,31 @@ def format_published_label(item: NewsItem) -> str:
 
 def build_alert_message(item: NewsItem, classification: Classification) -> str:
     url = item.url or item.naver_url
+    lead = "병역 관련 부정 이슈로 번질 수 있는 보도가 확인됐습니다."
+    if classification.severity == "높음":
+        lead = "병역 관련 여론 이슈로 확산될 수 있는 보도가 확인됐습니다."
+    elif classification.severity == "낮음":
+        lead = "병역 관련 모니터링 후보 보도가 확인됐습니다."
     return "\n".join(
         [
-            "🚨 병무청 부정 이슈 감지",
+            "🚨 병무청 관련 이슈 알림",
             "",
-            f"긴급도: {classification.severity}",
-            f"분류: {classification.category}",
+            lead,
+            "",
+            f"위험도: {classification.severity}",
+            f"유형: {classification.category}",
             f"발행: {format_published_label(item)}",
             "",
-            "제목:",
+            "📰 기사 제목",
             item.title,
             "",
-            "요약:",
+            "핵심 내용",
             classification.summary,
             "",
-            "판단:",
+            "확인 포인트",
             classification.reason,
             "",
-            "출처:",
+            "원문",
             f"{item.source} / {url}",
         ]
     )
