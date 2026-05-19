@@ -235,7 +235,7 @@ def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, 
 
     canvas = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(canvas)
-    draw.text((margin, 42), f"{date_label} {agency} 뉴스 이미지 10선", fill=TEXT, font=header_font)
+    draw.text((margin, 42), f"{date_label} {agency} 뉴스 이미지 모음", fill=TEXT, font=header_font)
     draw.text((margin, 110), "네이버 뉴스 기사 대표 이미지를 한 장으로 모았습니다.", fill=MUTED, font=subtitle_font)
     draw.line((margin, header_height - 24, width - margin, header_height - 24), fill=BORDER, width=2)
 
