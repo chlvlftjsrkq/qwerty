@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import html
 import json
@@ -19,6 +18,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -743,39 +743,157 @@ def related_link_lines(items: list[NewsItem]) -> list[str]:
     return lines
 
 
-def build_alert_image_prompt(
-    item: NewsItem,
-    classification: Classification,
-    related_items: list[NewsItem],
-) -> str:
-    related_titles = "; ".join(clean_text(related.title) for related in related_items[:3])
-    details = [
-        f"Article title: {clean_text(item.title)}",
-        f"Category: {clean_text(classification.category)}",
-        f"Severity: {clean_text(classification.severity)}",
-        f"Summary: {clean_text(classification.summary)}",
-        f"Reason: {clean_text(classification.reason)}",
+def image_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = [
+        r"C:\Windows\Fonts\malgunbd.ttf" if bold else r"C:\Windows\Fonts\malgun.ttf",
+        r"C:\Windows\Fonts\NanumGothicBold.ttf" if bold else r"C:\Windows\Fonts\NanumGothic.ttf",
+        r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
     ]
-    if related_titles:
-        details.append(f"Related titles: {related_titles}")
+    for candidate in candidates:
+        path = Path(candidate)
+        if path.exists():
+            return ImageFont.truetype(str(path), size=size)
+    return ImageFont.load_default()
 
-    return "\n".join(
+
+def draw_text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
+    if not text:
+        return 0
+    box = draw.textbbox((0, 0), text, font=font)
+    return int(box[2] - box[0])
+
+
+def image_wrap_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    max_width: int,
+    *,
+    max_lines: int = 4,
+) -> list[str]:
+    text = clean_text(text)
+    if not text:
+        return []
+    lines: list[str] = []
+    current = ""
+    tokens = re.findall(r"\S+\s*", text)
+    for token in tokens:
+        candidate = current + token
+        if draw_text_width(draw, candidate.rstrip(), font) <= max_width:
+            current = candidate
+            continue
+        if current.strip():
+            lines.append(current.strip())
+            current = ""
+            if len(lines) >= max_lines:
+                break
+        chunk = ""
+        for char in token.strip():
+            if draw_text_width(draw, chunk + char, font) <= max_width:
+                chunk += char
+            else:
+                if chunk:
+                    lines.append(chunk)
+                    if len(lines) >= max_lines:
+                        break
+                chunk = char
+        if len(lines) >= max_lines:
+            break
+        current = chunk + (" " if token.endswith(" ") else "")
+    if len(lines) < max_lines and current.strip():
+        lines.append(current.strip())
+    if len(lines) == max_lines and draw_text_width(draw, lines[-1], font) > max_width - 20:
+        while lines[-1] and draw_text_width(draw, lines[-1] + "...", font) > max_width:
+            lines[-1] = lines[-1][:-1]
+        lines[-1] = lines[-1].rstrip() + "..."
+    return lines[:max_lines]
+
+
+def safe_filename_hash(value: str) -> str:
+    return hashlib.sha1(value.encode("utf-8", errors="ignore")).hexdigest()[:10]
+
+
+def article_has_dental_context(item: NewsItem, classification: Classification) -> bool:
+    haystack = " ".join(
         [
-            "Create a square, high-impact editorial illustration for a Korean KakaoTalk news alert.",
-            "Use the article details below as visual inspiration, but do not quote or reproduce the article.",
-            "",
-            *details,
-            "",
-            "Visual direction:",
-            "- Make it feel immediately connected to a celebrity military-service controversy without depicting any real person.",
-            "- Use strong symbolic elements: anonymous performer silhouette, microphone, smartphone live broadcast, camera flashes, social media alert bubbles, military-service or medical-check papers, court document or gavel.",
-            "- If the article mentions dental treatment, teeth, extraction, or a similar controversy, include a dramatic dental X-ray or molar symbol as a visual clue.",
-            "- Keep the face hidden or fully generic. No real-person likeness, no celebrity name, no logos, no defamatory labels.",
-            "- Serious Korean breaking-news mood, cinematic lighting, navy/black/white palette with red alert accents.",
-            "- Readable as a phone thumbnail. Professional, polished, not cartoonish.",
-            "- Avoid gibberish text. Generic short labels like LIVE or NEWS are okay.",
+            item.title,
+            item.summary,
+            classification.summary,
+            classification.reason,
+            " ".join(classification.matched_terms),
         ]
-    )
+    ).lower()
+    terms = ["발치", "치아", "치과", "이빨", "어금니", "tooth", "teeth", "dental"]
+    return any(term in haystack for term in terms)
+
+
+def draw_soft_glow(base: Image.Image, center: tuple[int, int], radius: int, color: tuple[int, int, int]) -> None:
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    x, y = center
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*color, 120))
+    overlay = overlay.filter(ImageFilter.GaussianBlur(radius // 2))
+    base.alpha_composite(overlay)
+
+
+def draw_microphone(draw: ImageDraw.ImageDraw, x: int, y: int, scale: float, color: tuple[int, int, int]) -> None:
+    w = int(54 * scale)
+    h = int(92 * scale)
+    draw.rounded_rectangle((x, y, x + w, y + h), radius=int(24 * scale), fill=color)
+    draw.line((x + w // 2, y + h, x + w // 2, y + h + int(48 * scale)), fill=color, width=int(8 * scale))
+    draw.arc((x - int(22 * scale), y + int(30 * scale), x + w + int(22 * scale), y + h + int(22 * scale)), 0, 180, fill=color, width=int(7 * scale))
+    draw.line((x - int(10 * scale), y + h + int(48 * scale), x + w + int(10 * scale), y + h + int(48 * scale)), fill=color, width=int(8 * scale))
+
+
+def draw_gavel(draw: ImageDraw.ImageDraw, x: int, y: int, scale: float, color: tuple[int, int, int]) -> None:
+    draw.rounded_rectangle((x, y, x + int(120 * scale), y + int(38 * scale)), radius=int(10 * scale), fill=color)
+    draw.rounded_rectangle((x + int(18 * scale), y - int(14 * scale), x + int(102 * scale), y + int(52 * scale)), radius=int(8 * scale), outline=color, width=int(7 * scale))
+    draw.line((x + int(78 * scale), y + int(36 * scale), x + int(170 * scale), y + int(125 * scale)), fill=color, width=int(14 * scale))
+    draw.rounded_rectangle((x + int(150 * scale), y + int(112 * scale), x + int(230 * scale), y + int(142 * scale)), radius=int(11 * scale), fill=color)
+
+
+def draw_molar(draw: ImageDraw.ImageDraw, x: int, y: int, scale: float, color: tuple[int, int, int], accent: tuple[int, int, int]) -> None:
+    points = [
+        (x + int(15 * scale), y + int(15 * scale)),
+        (x + int(50 * scale), y),
+        (x + int(86 * scale), y + int(12 * scale)),
+        (x + int(112 * scale), y + int(48 * scale)),
+        (x + int(96 * scale), y + int(124 * scale)),
+        (x + int(70 * scale), y + int(176 * scale)),
+        (x + int(58 * scale), y + int(112 * scale)),
+        (x + int(42 * scale), y + int(176 * scale)),
+        (x + int(16 * scale), y + int(126 * scale)),
+        (x, y + int(52 * scale)),
+    ]
+    draw.polygon(points, fill=color)
+    draw.line((x + int(24 * scale), y + int(48 * scale), x + int(91 * scale), y + int(48 * scale)), fill=accent, width=int(7 * scale))
+    draw.line((x + int(40 * scale), y + int(76 * scale), x + int(78 * scale), y + int(76 * scale)), fill=accent, width=int(5 * scale))
+
+
+def draw_phone_panel(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, accent: tuple[int, int, int]) -> None:
+    draw.rounded_rectangle((x, y, x + w, y + h), radius=44, fill=(19, 28, 44), outline=(85, 101, 128), width=3)
+    draw.rounded_rectangle((x + 22, y + 22, x + w - 22, y + h - 22), radius=30, fill=(8, 16, 28))
+    draw.rounded_rectangle((x + 44, y + 46, x + 126, y + 82), radius=12, fill=accent)
+    draw.text((x + 60, y + 52), "LIVE", fill=(255, 255, 255), font=image_font(22, bold=True))
+    head = (x + w // 2, y + 170)
+    draw.ellipse((head[0] - 42, head[1] - 42, head[0] + 42, head[1] + 42), fill=(4, 7, 12))
+    draw.rounded_rectangle((head[0] - 76, head[1] + 34, head[0] + 76, head[1] + 190), radius=54, fill=(4, 7, 12))
+    for i, color in enumerate([(54, 78, 112), (74, 98, 135), accent]):
+        yy = y + h - 150 + i * 42
+        draw.rounded_rectangle((x + 52, yy, x + w - 52, yy + 22), radius=11, fill=color)
+    draw.ellipse((x + w - 74, y + h - 91, x + w - 34, y + h - 51), fill=accent)
+
+
+def draw_document_stack(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, accent: tuple[int, int, int]) -> None:
+    for offset, fill in [(26, (211, 217, 229)), (13, (231, 236, 245)), (0, (248, 250, 252))]:
+        draw.rounded_rectangle((x + offset, y - offset, x + w + offset, y + h - offset), radius=18, fill=fill)
+    draw.rounded_rectangle((x + 34, y + 34, x + 126, y + 74), radius=8, fill=accent)
+    draw.text((x + 51, y + 41), "NEWS", fill=(255, 255, 255), font=image_font(22, bold=True))
+    line_color = (97, 110, 130)
+    for index in range(5):
+        yy = y + 108 + index * 36
+        draw.rounded_rectangle((x + 40, yy, x + w - 44, yy + 13), radius=6, fill=line_color)
+    draw.rounded_rectangle((x + 40, y + h - 92, x + w - 160, y + h - 54), radius=10, outline=accent, width=4)
 
 
 def generate_alert_image(
@@ -784,50 +902,76 @@ def generate_alert_image(
     related_items: list[NewsItem],
     *,
     output_path: Path,
-    api_key: str,
-    model: str,
     size: str,
-    quality: str,
-    timeout_seconds: float,
 ) -> Path:
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required to generate an alert image.")
+    try:
+        width_text, height_text = size.lower().split("x", 1)
+        width, height = int(width_text), int(height_text)
+    except ValueError:
+        width, height = 1024, 1024
+    width = max(768, min(width, 1600))
+    height = max(768, min(height, 1600))
 
-    prompt = build_alert_image_prompt(item, classification, related_items)
-    response = requests.post(
-        "https://api.openai.com/v1/images/generations",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "prompt": prompt,
-            "size": size,
-            "quality": quality,
-            "n": 1,
-            "output_format": "png",
-        },
-        timeout=timeout_seconds,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"OpenAI image generation failed: {response.status_code} {response.text[:1000]}")
+    seed = int(hashlib.sha1((item.title + item.url).encode("utf-8", errors="ignore")).hexdigest()[:8], 16)
+    palettes = [
+        ((8, 15, 28), (190, 38, 52), (230, 238, 248)),
+        ((12, 19, 34), (222, 72, 50), (244, 239, 229)),
+        ((9, 24, 35), (214, 47, 92), (234, 244, 247)),
+    ]
+    bg, accent, paper = palettes[seed % len(palettes)]
+    image = Image.new("RGBA", (width, height), bg + (255,))
+    draw_soft_glow(image, (int(width * 0.22), int(height * 0.24)), int(width * 0.28), accent)
+    draw_soft_glow(image, (int(width * 0.76), int(height * 0.70)), int(width * 0.24), (38, 95, 150))
+    draw = ImageDraw.Draw(image)
 
-    data = response.json()
-    images = data.get("data") or []
-    if not images:
-        raise RuntimeError("OpenAI image generation returned no image data.")
+    for offset in range(-height, width, 72):
+        draw.line((offset, 0, offset + height, height), fill=(255, 255, 255, 16), width=2)
+
+    draw.rounded_rectangle((54, 52, width - 54, height - 52), radius=46, outline=(255, 255, 255, 42), width=2)
+    draw.rounded_rectangle((74, 72, 240, 124), radius=18, fill=accent)
+    draw.text((102, 84), "ISSUE WATCH", fill=(255, 255, 255), font=image_font(26, bold=True))
+    draw.rounded_rectangle((width - 284, 75, width - 76, 123), radius=16, fill=(28, 42, 63), outline=(255, 255, 255, 78))
+    draw.text((width - 254, 85), "MILITARY SERVICE", fill=(235, 241, 249), font=image_font(22, bold=True))
+
+    draw_phone_panel(draw, 84, 176, 290, 430, accent)
+    draw_document_stack(draw, width - 390, 178, 300, 300, accent)
+    draw_gavel(draw, width - 338, 530, 0.9, (223, 232, 243))
+    draw_microphone(draw, 450, 238, 1.0, (229, 235, 244))
+
+    if article_has_dental_context(item, classification):
+        draw.rounded_rectangle((84, height - 302, 296, height - 114), radius=26, fill=(231, 240, 248), outline=accent, width=5)
+        draw.text((116, height - 278), "X-RAY", fill=(25, 37, 56), font=image_font(26, bold=True))
+        draw_molar(draw, 131, height - 240, 0.98, (23, 37, 60), accent)
+
+    title_font = image_font(42, bold=True)
+    body_font = image_font(25)
+    meta_font = image_font(26, bold=True)
+    title_box = (350, 610, width - 76, height - 126)
+    draw.rounded_rectangle(title_box, radius=28, fill=(255, 255, 255, 232))
+    draw.text((title_box[0] + 34, title_box[1] + 26), "REPRESENTATIVE ARTICLE", fill=accent, font=meta_font)
+    title_lines = image_wrap_text(draw, item.title, title_font, title_box[2] - title_box[0] - 68, max_lines=3)
+    y = title_box[1] + 72
+    for line in title_lines:
+        draw.text((title_box[0] + 34, y), line, fill=(12, 22, 37), font=title_font)
+        y += 52
+
+    summary = classification.summary or item.summary
+    summary_lines = image_wrap_text(draw, summary, body_font, title_box[2] - title_box[0] - 68, max_lines=2)
+    y += 12
+    for line in summary_lines:
+        if y + 32 > title_box[3] - 20:
+            break
+        draw.text((title_box[0] + 36, y), line, fill=(59, 72, 92), font=body_font)
+        y += 32
+
+    source = item.source or source_from_url(item.url)
+    related_label = f"RELATED {len(related_items)}"
+    draw.rounded_rectangle((84, height - 92, width - 84, height - 52), radius=18, fill=(28, 42, 63), outline=(255, 255, 255, 54))
+    draw.text((112, height - 84), source.upper()[:28], fill=(236, 242, 249), font=image_font(23, bold=True))
+    draw.text((width - 230, height - 84), related_label, fill=(236, 242, 249), font=image_font(23, bold=True))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    first = images[0]
-    if first.get("b64_json"):
-        output_path.write_bytes(base64.b64decode(first["b64_json"]))
-    elif first.get("url"):
-        image_response = requests.get(first["url"], timeout=timeout_seconds)
-        image_response.raise_for_status()
-        output_path.write_bytes(image_response.content)
-    else:
-        raise RuntimeError("OpenAI image generation response had neither b64_json nor url.")
+    image.convert("RGB").save(output_path, quality=94)
     return output_path
 
 
@@ -985,10 +1129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=os.getenv("NEGATIVE_WATCH_OUTPUT_DIR", "runs/negative-watch"))
     parser.add_argument("--alert-image", default=os.getenv("NEGATIVE_WATCH_ALERT_IMAGE", ""))
     parser.add_argument("--generate-alert-image", action="store_true", default=os.getenv("NEGATIVE_WATCH_GENERATE_IMAGE", "").strip().lower() in {"1", "true", "yes", "y", "on"})
-    parser.add_argument("--image-model", default=os.getenv("NEGATIVE_WATCH_IMAGE_MODEL", "gpt-image-1-mini"))
     parser.add_argument("--image-size", default=os.getenv("NEGATIVE_WATCH_IMAGE_SIZE", "1024x1024"))
-    parser.add_argument("--image-quality", default=os.getenv("NEGATIVE_WATCH_IMAGE_QUALITY", "medium"))
-    parser.add_argument("--image-timeout-seconds", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_TIMEOUT_SECONDS", "180")))
     parser.add_argument("--image-open-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_OPEN_WAIT", "1.5")))
     parser.add_argument("--image-send-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_SEND_WAIT", "5.0")))
     parser.add_argument("--queries", default=os.getenv("NEGATIVE_WATCH_QUERIES", ""))
@@ -1012,7 +1153,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-provider", default=os.getenv("NEGATIVE_WATCH_SUMMARY_PROVIDER", "codex"))
     parser.add_argument("--naver-client-id", default=os.getenv("NAVER_CLIENT_ID", ""))
     parser.add_argument("--naver-client-secret", default=os.getenv("NAVER_CLIENT_SECRET", ""))
-    parser.add_argument("--openai-api-key", default=os.getenv("OPENAI_API_KEY", ""))
     parser.add_argument("--proxy-base-url", default=os.getenv("KSKILL_PROXY_BASE_URL", "https://k-skill-proxy.nomadamas.org"))
     parser.add_argument("--timeout-seconds", type=float, default=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "15")))
     return parser.parse_args()
@@ -1230,11 +1370,7 @@ def main() -> int:
                     classification,
                     related_items,
                     output_path=output_dir / f"negative-alert-image-{timestamp}-{index:02d}.png",
-                    api_key=args.openai_api_key,
-                    model=args.image_model,
                     size=args.image_size,
-                    quality=args.image_quality,
-                    timeout_seconds=args.image_timeout_seconds,
                 )
                 alert_image_paths.append(str(alert_image))
             if alert_image is not None:
