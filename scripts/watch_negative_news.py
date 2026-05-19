@@ -904,6 +904,68 @@ def generate_alert_image(
     output_path: Path,
     size: str,
 ) -> Path:
+    articles = []
+    for article in [item, *related_items]:
+        url = article.url or article.naver_url
+        if not url:
+            continue
+        articles.append(
+            {
+                "title": article.title,
+                "source": article.source or source_from_url(url),
+                "url": url,
+                "summary": article.summary,
+            }
+        )
+    if not articles:
+        articles.append(
+            {
+                "title": item.title or "병무청 관련 이슈",
+                "source": item.source or "naver-news",
+                "url": item.url or item.naver_url,
+                "summary": item.summary,
+            }
+        )
+
+    articles_path = output_path.with_suffix(".articles.json")
+    articles_path.parent.mkdir(parents=True, exist_ok=True)
+    articles_path.write_text(json.dumps(articles[:10], ensure_ascii=False, indent=2), encoding="utf-8")
+
+    published = parse_iso_datetime(item.published_at) or datetime.now(KST)
+    command = [
+        sys.executable,
+        str(ROOT_DIR / "scripts" / "build_news_image_sheet.py"),
+        "--articles",
+        str(articles_path),
+        "--output",
+        str(output_path),
+        "--date",
+        published.strftime("%Y-%m-%d"),
+        "--agency",
+        "병무청 이슈",
+        "--limit",
+        str(min(10, len(articles))),
+    ]
+    result = subprocess.run(
+        command,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=180,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = "\n".join(
+            part.strip()
+            for part in [result.stdout[-2000:], result.stderr[-2000:]]
+            if part.strip()
+        )
+        raise RuntimeError(f"Article image sheet generation failed with exit {result.returncode}: {details}")
+    if not output_path.exists():
+        raise RuntimeError(f"Article image sheet was not created: {output_path}")
+    return output_path
+
     try:
         width_text, height_text = size.lower().split("x", 1)
         width, height = int(width_text), int(height_text)
