@@ -1,0 +1,107 @@
+name: Negative MMA News Watch
+
+run-name: Negative MMA News Watch - ${{ github.event.inputs.trigger_source || github.event.inputs.target_chatroom || 'manual' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger_source:
+        description: "Execution source, for example pc-negative-watch-5min-test."
+        required: false
+        default: ""
+      target_chatroom:
+        description: "KakaoTalk room to receive alerts."
+        required: false
+        default: "test"
+      max_alerts:
+        description: "Maximum alert messages to send in one run."
+        required: false
+        default: "1"
+      lookback_hours:
+        description: "Only inspect news published within this many hours."
+        required: false
+        default: "168"
+      dry_run:
+        description: "When true, collect and classify only without sending KakaoTalk messages."
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: [self-hosted, Windows, X64, kakao, qwerty]
+    timeout-minutes: 15
+    concurrency:
+      group: negative-mma-news-watch
+      cancel-in-progress: false
+    env:
+      PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
+      TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || 'test' }}
+      NEGATIVE_WATCH_STATE: C:\omx\qwerty\.scheduler\negative-news-watch-seen.json
+      NEGATIVE_WATCH_OUTPUT_DIR: runs\negative-watch
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify local Python
+        shell: powershell
+        run: '& $env:PYTHON_EXE --version'
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          & $env:PYTHON_EXE -m pip install --upgrade pip
+          & $env:PYTHON_EXE -m pip install -r requirements.txt
+          & $env:PYTHON_EXE -m pip install "git+https://github.com/kronenz/kakaotalk-mcp.git@master"
+
+      - name: Watch Naver news and send KakaoTalk alert
+        shell: powershell
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
+          CODEX_COMMAND: ${{ vars.CODEX_COMMAND || 'C:\Users\April\AppData\Roaming\npm\codex.cmd' }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL || '' }}
+          CODEX_TIMEOUT_SECONDS: ${{ vars.CODEX_TIMEOUT_SECONDS || '120' }}
+          NEGATIVE_WATCH_SUMMARY_PROVIDER: ${{ vars.NEGATIVE_WATCH_SUMMARY_PROVIDER || 'codex' }}
+          MAX_ALERTS_INPUT: ${{ github.event.inputs.max_alerts || '1' }}
+          LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '168' }}
+          DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
+          if (!(Test-Path $mcpCommand)) {
+            throw "kakaotalk-mcp executable was not found: $mcpCommand"
+          }
+
+          $argsList = @(
+            "scripts/watch_negative_news.py",
+            "--room", "$env:TARGET_CHATROOM",
+            "--state", "$env:NEGATIVE_WATCH_STATE",
+            "--output-dir", "$env:NEGATIVE_WATCH_OUTPUT_DIR",
+            "--max-alerts", "$env:MAX_ALERTS_INPUT",
+            "--lookback-hours", "$env:LOOKBACK_HOURS_INPUT",
+            "--mcp-command", "$mcpCommand",
+            "--verify"
+          )
+          if ("$env:DRY_RUN_INPUT".Trim().ToLowerInvariant() -eq "true") {
+            $argsList += "--dry-run"
+          }
+          & $env:PYTHON_EXE @argsList
+
+      - name: Write run summary
+        if: always()
+        shell: powershell
+        run: |
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Negative MMA news watch" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target chatroom: $env:TARGET_CHATROOM" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- State file: $env:NEGATIVE_WATCH_STATE" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Output dir: $env:NEGATIVE_WATCH_OUTPUT_DIR" -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: negative-news-watch-runs
+          path: runs/negative-watch/
