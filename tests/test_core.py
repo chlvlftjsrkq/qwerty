@@ -16,7 +16,7 @@ from kakao_mma_news.summarize import (
 )
 from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import markdown_to_speech
-from scripts.watch_negative_news import NewsItem, classify_heuristic, topic_fingerprint
+from scripts.watch_negative_news import NewsItem, classify_heuristic, in_active_window, topic_fingerprint
 
 
 class CoreTests(unittest.TestCase):
@@ -363,6 +363,12 @@ class CoreTests(unittest.TestCase):
             topic_fingerprint(first, classify_heuristic(first)),
             topic_fingerprint(reaction, classify_heuristic(reaction)),
         )
+
+    def test_negative_watch_active_window(self):
+        self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))
+        self.assertTrue(in_active_window(datetime(2026, 5, 19, 21, 59, tzinfo=timezone.utc), 8, 22))
+        self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 0, tzinfo=timezone.utc), 8, 22))
+        self.assertFalse(in_active_window(datetime(2026, 5, 19, 7, 59, tzinfo=timezone.utc), 8, 22))
 
 
 if __name__ == "__main__":

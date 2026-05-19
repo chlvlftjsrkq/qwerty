@@ -21,6 +21,18 @@ on:
         description: "Only inspect news published within this many hours."
         required: false
         default: "168"
+      topic_ttl_hours:
+        description: "Suppress alerts with the same issue topic for this many hours."
+        required: false
+        default: "24"
+      active_start_hour:
+        description: "KST hour when monitoring starts."
+        required: false
+        default: "8"
+      active_end_hour:
+        description: "KST hour when monitoring stops."
+        required: false
+        default: "22"
       dry_run:
         description: "When true, collect and classify only without sending KakaoTalk messages."
         type: boolean
@@ -68,6 +80,9 @@ jobs:
           NEGATIVE_WATCH_SUMMARY_PROVIDER: ${{ vars.NEGATIVE_WATCH_SUMMARY_PROVIDER || 'codex' }}
           MAX_ALERTS_INPUT: ${{ github.event.inputs.max_alerts || '1' }}
           LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '168' }}
+          TOPIC_TTL_HOURS_INPUT: ${{ github.event.inputs.topic_ttl_hours || '24' }}
+          ACTIVE_START_HOUR_INPUT: ${{ github.event.inputs.active_start_hour || '8' }}
+          ACTIVE_END_HOUR_INPUT: ${{ github.event.inputs.active_end_hour || '22' }}
           DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
@@ -82,6 +97,9 @@ jobs:
             "--output-dir", "$env:NEGATIVE_WATCH_OUTPUT_DIR",
             "--max-alerts", "$env:MAX_ALERTS_INPUT",
             "--lookback-hours", "$env:LOOKBACK_HOURS_INPUT",
+            "--topic-ttl-hours", "$env:TOPIC_TTL_HOURS_INPUT",
+            "--active-start-hour", "$env:ACTIVE_START_HOUR_INPUT",
+            "--active-end-hour", "$env:ACTIVE_END_HOUR_INPUT",
             "--mcp-command", "$mcpCommand",
             "--verify"
           )

@@ -329,6 +329,16 @@ def prune_seen_topics(seen_topics: dict[str, str], now: datetime, ttl_hours: int
     return pruned
 
 
+def in_active_window(now: datetime, start_hour: int, end_hour: int) -> bool:
+    start = start_hour % 24
+    end = end_hour % 24
+    if start == end:
+        return True
+    if start < end:
+        return start <= now.hour < end
+    return now.hour >= start or now.hour < end
+
+
 def normalize_topic_token(value: str) -> str:
     token = re.sub(r"[\[\]{}()（）<>〈〉'\"“”‘’.,!?·ㆍ:;|/\\]", " ", value)
     token = re.sub(r"\s+", "", token).casefold()
@@ -779,7 +789,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--display", type=int, default=int(os.getenv("NEGATIVE_WATCH_DISPLAY", "50")))
     parser.add_argument("--pages", type=int, default=int(os.getenv("NEGATIVE_WATCH_PAGES", "2")))
     parser.add_argument("--lookback-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_LOOKBACK_HOURS", "168")))
-    parser.add_argument("--topic-ttl-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_TOPIC_TTL_HOURS", "168")))
+    parser.add_argument("--topic-ttl-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_TOPIC_TTL_HOURS", "24")))
+    parser.add_argument("--active-start-hour", type=int, default=int(os.getenv("NEGATIVE_WATCH_ACTIVE_START_HOUR", "8")))
+    parser.add_argument("--active-end-hour", type=int, default=int(os.getenv("NEGATIVE_WATCH_ACTIVE_END_HOUR", "22")))
+    parser.add_argument("--ignore-active-window", action="store_true", help="Run even outside the configured active hours")
     parser.add_argument("--max-alerts", type=int, default=int(os.getenv("NEGATIVE_WATCH_MAX_ALERTS", "1")))
     parser.add_argument("--dry-run", action="store_true", help="Do not send KakaoTalk messages or update state")
     parser.add_argument("--verify", action="store_true", help="Verify posted KakaoTalk alert")
@@ -810,6 +823,32 @@ def main() -> int:
 
     queries = [item.strip() for item in args.queries.split(",") if item.strip()] or DEFAULT_QUERIES
     now = datetime.now(KST)
+    if not args.ignore_active_window and not in_active_window(now, args.active_start_hour, args.active_end_hour):
+        print(
+            json.dumps(
+                {
+                    "room": args.room,
+                    "dry_run": args.dry_run,
+                    "skipped": True,
+                    "reason": "outside_active_window",
+                    "active_start_hour": args.active_start_hour,
+                    "active_end_hour": args.active_end_hour,
+                    "checked_at": now.isoformat(),
+                    "fetched_count": 0,
+                    "deduped_recent_count": 0,
+                    "new_count": 0,
+                    "topic_duplicate_count": 0,
+                    "seen_topic_count": 0,
+                    "alert_count": 0,
+                    "posted": 0,
+                    "errors": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
     state = load_state(state_path)
     seen_urls: dict[str, str] = state.get("seen_urls", {})
     seen_topics: dict[str, str] = prune_seen_topics(

@@ -8,6 +8,9 @@ param(
     [string]$TargetChatroom = "test",
     [int]$MaxAlerts = 1,
     [int]$LookbackHours = 168,
+    [int]$TopicTtlHours = 24,
+    [int]$ActiveStartHour = 8,
+    [int]$ActiveEndHour = 22,
     [switch]$DryRun,
     [switch]$StartNow
 )
@@ -35,6 +38,9 @@ $arguments = @(
     "-TargetChatroom", "`"$TargetChatroom`"",
     "-MaxAlerts", "$MaxAlerts",
     "-LookbackHours", "$LookbackHours",
+    "-TopicTtlHours", "$TopicTtlHours",
+    "-ActiveStartHour", "$ActiveStartHour",
+    "-ActiveEndHour", "$ActiveEndHour",
     "-DryRun", "$dryRunValue",
     "-TriggerSource", "pc-negative-watch-5min-test"
 )
@@ -44,10 +50,13 @@ $action = New-ScheduledTaskAction `
     -Argument ($arguments -join " ") `
     -WorkingDirectory $Root
 
-$startAt = (Get-Date).AddMinutes(1)
-$trigger = New-ScheduledTaskTrigger -Once -At $startAt `
+$startHour = (($ActiveStartHour % 24) + 24) % 24
+$endHour = (($ActiveEndHour % 24) + 24) % 24
+$durationHours = if ($endHour -gt $startHour) { $endHour - $startHour } elseif ($endHour -lt $startHour) { 24 - $startHour + $endHour } else { 24 }
+$startAt = (Get-Date).Date.AddHours($startHour)
+$trigger = New-ScheduledTaskTrigger -Daily -At $startAt `
     -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
-    -RepetitionDuration (New-TimeSpan -Days 3650)
+    -RepetitionDuration (New-TimeSpan -Hours $durationHours)
 
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
@@ -65,7 +74,8 @@ Register-ScheduledTask `
 
 Write-Host "Registered task: $TaskName"
 Write-Host "Interval minutes: $IntervalMinutes"
-Write-Host "First scheduled run: $startAt"
+Write-Host "Active hours: $($startHour):00-$($endHour):00"
+Write-Host "Daily start: $startAt"
 Write-Host "Target chatroom: $TargetChatroom"
 Write-Host "Workflow target: $Repo / $Workflow"
 
