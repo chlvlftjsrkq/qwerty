@@ -89,7 +89,7 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
             "# 1️⃣ 기사 제목\n"
             "기사 요약 1~2문장. 줄임표 없이 경어체로 끝맺음.\n"
             f"Opinion: {policy_perspective} 관점의 의미나 확인 포인트 1~2문장.\n"
-            "Source: 매체 / 링크\n\n"
+            "Source: 원문 링크\n\n"
             "# 2️⃣ 기사 제목\n"
             "기사 요약 1~2문장.\n\n"
             "---\n\n"
@@ -204,11 +204,11 @@ def _without_lines_starting(summary: str, prefixes: tuple[str, ...]) -> str:
     )
 
 
-def _source_without_url(summary: str) -> str:
+def _source_url_only(summary: str) -> str:
     lines = []
     for line in summary.splitlines():
         if line.startswith("Source:") and " / " in line:
-            lines.append(line.split(" / ", 1)[0])
+            lines.append("Source: " + line.rsplit(" / ", 1)[1].strip())
         else:
             lines.append(line)
     return "\n".join(lines)
@@ -222,7 +222,7 @@ def _fit_summary_for_kakao(summary: str, max_chars: int = KAKAO_MESSAGE_SOFT_LIM
     if len(compact) <= max_chars:
         return compact
 
-    compact = _source_without_url(compact)
+    compact = _source_url_only(compact)
     if len(compact) <= max_chars:
         return compact
 
@@ -295,7 +295,6 @@ def _render_codex_summary(
             title = _clean_title(item.get("title"))
             summary = _clean_text(item.get("summary"), 150)
             opinion = _clean_text(item.get("opinion"), 110)
-            source = _clean_text(item.get("source"), 80) or "네이버 뉴스"
             url = _clean_text(item.get("url"), 500)
             if not title or not summary:
                 continue
@@ -324,7 +323,7 @@ def _render_codex_summary(
                     f"# {number} {title}",
                     summary,
                     f"Opinion: {opinion or fallback_opinion}",
-                    f"Source: {source}{' / ' + url if url else ''}",
+                    f"Source: {url or _clean_text(item.get('source'), 80) or '네이버 뉴스'}",
                     "",
                 ]
             )
@@ -542,7 +541,7 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
                 f"# {number} {_clean_title(article.title)}",
                 f"{summary} 🎯",
                 f"Opinion: {_article_opinion(article, agency_name)}",
-                f"Source: {article.source or '네이버 뉴스'} / {article.url}",
+                f"Source: {article.url or article.source or '네이버 뉴스'}",
                 "",
             ]
         )

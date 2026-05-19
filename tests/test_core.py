@@ -83,7 +83,8 @@ class CoreTests(unittest.TestCase):
         self.assertIn("🪖 2026-05-15 병무청 뉴스 브리핑", summary)
         self.assertIn("# 1️⃣ 전북지방병무청, 경진대회", summary)
         self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
-        self.assertIn("Source: example.com / https://example.com/news", summary)
+        self.assertIn("Source: https://example.com/news", summary)
+        self.assertNotIn("Source: example.com / https://example.com/news", summary)
         self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
         self.assertNotIn("말줄임표", summary)
 

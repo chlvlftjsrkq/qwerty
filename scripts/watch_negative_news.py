@@ -536,7 +536,7 @@ def format_published_label(item: NewsItem) -> str:
         dt = datetime.fromisoformat(item.published_at).astimezone(KST)
     except ValueError:
         return "발행 시각 확인 안 됨"
-    return dt.strftime("%Y-%m-%d %H:%M KST")
+    return f"{dt.year}년 {dt.month}월 {dt.day}일 {dt.hour}시 {dt.minute:02d}분"
 
 
 def build_alert_message(item: NewsItem, classification: Classification) -> str:
@@ -566,7 +566,7 @@ def build_alert_message(item: NewsItem, classification: Classification) -> str:
             classification.reason,
             "",
             "원문",
-            f"{item.source} / {url}",
+            url,
         ]
     )
 
