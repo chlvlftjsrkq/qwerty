@@ -686,36 +686,105 @@ def format_published_label(item: NewsItem) -> str:
     return f"{dt.year}년 {dt.month}월 {dt.day}일 {dt.hour}시 {dt.minute:02d}분"
 
 
-def build_alert_message(item: NewsItem, classification: Classification) -> str:
+def item_key(item: NewsItem) -> str:
+    return item.url or item.naver_url or item.title
+
+
+def sort_key_published(item: NewsItem) -> datetime:
+    parsed = parse_iso_datetime(item.published_at)
+    return parsed or datetime.min.replace(tzinfo=KST)
+
+
+def within_hours(item: NewsItem, hours: int, now: datetime) -> bool:
+    if hours <= 0:
+        return True
+    published = parse_iso_datetime(item.published_at)
+    if not published:
+        return True
+    return published >= now - timedelta(hours=hours)
+
+
+def related_articles_for_topic(
+    topic_key: str,
+    representative: NewsItem,
+    items: list[NewsItem],
+    classifications: dict[str, Classification],
+    now: datetime,
+    related_hours: int,
+    related_limit: int,
+) -> list[NewsItem]:
+    representative_key = item_key(representative)
+    related: list[NewsItem] = []
+    seen: set[str] = {representative_key}
+    for item in items:
+        key = item_key(item)
+        if key in seen or not within_hours(item, related_hours, now):
+            continue
+        classification = classifications.get(key)
+        if classification is None:
+            classification = classify_heuristic(item)
+            classifications[key] = classification
+        if classification.score <= 0:
+            continue
+        if topic_fingerprint(item, classification) != topic_key:
+            continue
+        seen.add(key)
+        related.append(item)
+
+    related.sort(key=sort_key_published, reverse=True)
+    return related[: max(0, related_limit)]
+
+
+def related_link_lines(items: list[NewsItem]) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(items, start=1):
+        lines.extend([f"{index}. {item.title}", item.url or item.naver_url])
+    return lines
+
+
+def build_alert_message(
+    item: NewsItem,
+    classification: Classification,
+    related_items: list[NewsItem] | None = None,
+    related_hours: int = 12,
+) -> str:
     url = item.url or item.naver_url
+    related_items = related_items or []
     lead = "병역 관련 부정 이슈로 번질 수 있는 보도가 확인됐습니다."
     if classification.severity == "높음":
         lead = "병역 관련 여론 이슈로 확산될 수 있는 보도가 확인됐습니다."
     elif classification.severity == "낮음":
         lead = "병역 관련 모니터링 후보 보도가 확인됐습니다."
-    return "\n".join(
-        [
-            "🚨 병무청 관련 이슈 알림",
-            "",
-            lead,
-            "",
-            f"위험도: {classification.severity}",
-            f"유형: {classification.category}",
-            f"발행: {format_published_label(item)}",
-            "",
-            "📰 기사 제목",
-            item.title,
-            "",
-            "핵심 내용",
-            classification.summary,
-            "",
-            "확인 포인트",
-            classification.reason,
-            "",
-            "원문",
-            url,
-        ]
-    )
+    summary = classification.summary
+    if related_items:
+        summary = (
+            f"{summary}\n"
+            f"같은 이슈로 최근 {related_hours}시간 안에 추가 보도 {len(related_items)}건이 함께 확인됐습니다."
+        )
+    lines = [
+        "🚨 병무청 관련 이슈 알림",
+        "",
+        lead,
+        "",
+        f"위험도: {classification.severity}",
+        f"유형: {classification.category}",
+        f"발행: {format_published_label(item)}",
+        "",
+        "📰 대표 기사",
+        item.title,
+        "",
+        "핵심 내용",
+        summary,
+        "",
+        "확인 포인트",
+        classification.reason,
+        "",
+        "대표 원문",
+        url,
+    ]
+    if related_items:
+        lines.extend(["", f"관련 기사 링크 최대 {len(related_items)}건", *related_link_lines(related_items)])
+    return "\n".join(lines)
 
 
 def resolve_mcp_command(value: str) -> str:
@@ -789,7 +858,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--display", type=int, default=int(os.getenv("NEGATIVE_WATCH_DISPLAY", "50")))
     parser.add_argument("--pages", type=int, default=int(os.getenv("NEGATIVE_WATCH_PAGES", "2")))
     parser.add_argument("--lookback-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_LOOKBACK_HOURS", "168")))
-    parser.add_argument("--topic-ttl-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_TOPIC_TTL_HOURS", "24")))
+    parser.add_argument("--topic-ttl-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_TOPIC_TTL_HOURS", "12")))
+    parser.add_argument("--related-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_RELATED_HOURS", "12")))
+    parser.add_argument("--related-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_RELATED_LIMIT", "5")))
     parser.add_argument("--active-start-hour", type=int, default=int(os.getenv("NEGATIVE_WATCH_ACTIVE_START_HOUR", "8")))
     parser.add_argument("--active-end-hour", type=int, default=int(os.getenv("NEGATIVE_WATCH_ACTIVE_END_HOUR", "22")))
     parser.add_argument("--ignore-active-window", action="store_true", help="Run even outside the configured active hours")
@@ -856,6 +927,7 @@ def main() -> int:
         now,
         args.topic_ttl_hours,
     )
+    classifications: dict[str, Classification] = {}
 
     fetched: list[NewsItem] = []
     errors: list[str] = []
@@ -883,27 +955,41 @@ def main() -> int:
     new_items = [
         item
         for item in items
-        if (item.url or item.naver_url or item.title) not in seen_urls
+        if item_key(item) not in seen_urls
     ]
 
     # Older state files only had URL-level dedupe. Rebuild issue-level topics
     # from URLs we have already seen and that still appear in the Naver window.
-    for item in items:
-        key = item.url or item.naver_url or item.title
-        if key not in seen_urls:
-            continue
+    if not seen_topics:
+        for item in items:
+            key = item_key(item)
+            if key not in seen_urls:
+                continue
+            seen_at = parse_iso_datetime(seen_urls[key])
+            if args.topic_ttl_hours > 0 and seen_at and seen_at < now - timedelta(hours=args.topic_ttl_hours):
+                continue
+            classification = classify_heuristic(item)
+            classifications[key] = classification
+            if classification.score <= 0:
+                continue
+            seen_topics.setdefault(topic_fingerprint(item, classification), seen_urls[key])
+
+    def classify_cached(item: NewsItem) -> Classification:
+        key = item_key(item)
+        cached = classifications.get(key)
+        if cached is not None:
+            return cached
         classification = classify_heuristic(item)
-        if classification.score <= 0:
-            continue
-        seen_topics.setdefault(topic_fingerprint(item, classification), seen_urls[key])
+        classifications[key] = classification
+        return classification
 
     raw_pairs: list[tuple[NewsItem, Classification, str]] = []
     inspected_keys: list[str] = []
     for item in new_items:
-        classification = classify_heuristic(item)
+        classification = classify_cached(item)
         if classification.score <= 0:
             continue
-        inspected_keys.append(item.url or item.naver_url or item.title)
+        inspected_keys.append(item_key(item))
         raw_pairs.append((item, classification, topic_fingerprint(item, classification)))
 
     raw_pairs.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
@@ -911,9 +997,7 @@ def main() -> int:
     heuristic_pairs: list[tuple[NewsItem, Classification, str]] = []
     run_topics: set[str] = set()
     topic_duplicate_count = 0
-    inspected_topics: list[str] = []
     for item, classification, topic_key in raw_pairs:
-        inspected_topics.append(topic_key)
         if topic_key in seen_topics or topic_key in run_topics:
             topic_duplicate_count += 1
             continue
@@ -940,7 +1024,27 @@ def main() -> int:
 
     classified.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
     alerts = classified[: max(0, args.max_alerts)]
-    messages = [build_alert_message(item, classification) for item, classification, _topic_key in alerts]
+    related_by_topic = {
+        topic_key: related_articles_for_topic(
+            topic_key,
+            item,
+            items,
+            classifications,
+            now,
+            args.related_hours,
+            args.related_limit,
+        )
+        for item, _classification, topic_key in alerts
+    }
+    messages = [
+        build_alert_message(
+            item,
+            classification,
+            related_by_topic.get(topic_key, []),
+            args.related_hours,
+        )
+        for item, classification, topic_key in alerts
+    ]
 
     timestamp = now.strftime("%Y%m%d-%H%M%S")
     candidates_path = output_dir / f"candidates-{timestamp}.json"
@@ -961,6 +1065,7 @@ def main() -> int:
                         "article": asdict(item),
                         "classification": asdict(classification),
                         "topic_key": topic_key,
+                        "related_articles": [asdict(related) for related in related_by_topic.get(topic_key, [])],
                     }
                     for item, classification, topic_key in alerts
                 ],
@@ -980,10 +1085,8 @@ def main() -> int:
 
         for key in inspected_keys:
             seen_urls[key] = now.isoformat()
-        for topic_key in inspected_topics:
-            seen_topics[topic_key] = now.isoformat()
         for item, _classification, topic_key in alerts:
-            seen_urls[item.url or item.naver_url or item.title] = now.isoformat()
+            seen_urls[item_key(item)] = now.isoformat()
             seen_topics[topic_key] = now.isoformat()
         state["seen_urls"] = dict(list(seen_urls.items())[-2000:])
         state["seen_topics"] = dict(list(seen_topics.items())[-2000:])
@@ -1000,6 +1103,9 @@ def main() -> int:
                             "room": args.room,
                             "topic_key": topic_key,
                             "article": asdict(item),
+                            "related_articles": [
+                                asdict(related) for related in related_by_topic.get(topic_key, [])
+                            ],
                             "classification": asdict(classification),
                         },
                         ensure_ascii=False,

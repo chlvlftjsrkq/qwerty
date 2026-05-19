@@ -16,7 +16,13 @@ from kakao_mma_news.summarize import (
 )
 from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import markdown_to_speech
-from scripts.watch_negative_news import NewsItem, classify_heuristic, in_active_window, topic_fingerprint
+from scripts.watch_negative_news import (
+    NewsItem,
+    build_alert_message,
+    classify_heuristic,
+    in_active_window,
+    topic_fingerprint,
+)
 
 
 class CoreTests(unittest.TestCase):
@@ -369,6 +375,41 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 21, 59, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 0, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 7, 59, tzinfo=timezone.utc), 8, 22))
+
+    def test_negative_watch_alert_includes_related_links(self):
+        representative = NewsItem(
+            title="MC몽, 병역 비리 의혹 재차 해명",
+            url="https://example.com/main",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T12:00:00+09:00",
+            summary="MC몽이 병역비리 의혹을 해명했다.",
+            query="병역비리",
+        )
+        related = [
+            NewsItem(
+                title=f"MC몽 병역 논란 관련 기사 {idx}",
+                url=f"https://example.com/related-{idx}",
+                naver_url="",
+                source="example.com",
+                published_at="2026-05-19T12:0{idx}:00+09:00",
+                summary="같은 이슈입니다.",
+                query="병역비리",
+            )
+            for idx in range(1, 7)
+        ]
+        message = build_alert_message(
+            representative,
+            classify_heuristic(representative),
+            related[:5],
+            related_hours=12,
+        )
+        self.assertIn("📰 대표 기사", message)
+        self.assertIn("대표 원문\nhttps://example.com/main", message)
+        self.assertIn("같은 이슈로 최근 12시간 안에 추가 보도 5건", message)
+        self.assertIn("관련 기사 링크 최대 5건", message)
+        self.assertIn("https://example.com/related-5", message)
+        self.assertNotIn("https://example.com/related-6", message)
 
 
 if __name__ == "__main__":

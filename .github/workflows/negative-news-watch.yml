@@ -24,7 +24,15 @@ on:
       topic_ttl_hours:
         description: "Suppress alerts with the same issue topic for this many hours."
         required: false
-        default: "24"
+        default: "12"
+      related_hours:
+        description: "Attach related links from the same issue topic within this many hours."
+        required: false
+        default: "12"
+      related_limit:
+        description: "Maximum related article links to attach after the representative article."
+        required: false
+        default: "5"
       active_start_hour:
         description: "KST hour when monitoring starts."
         required: false
@@ -80,7 +88,9 @@ jobs:
           NEGATIVE_WATCH_SUMMARY_PROVIDER: ${{ vars.NEGATIVE_WATCH_SUMMARY_PROVIDER || 'codex' }}
           MAX_ALERTS_INPUT: ${{ github.event.inputs.max_alerts || '1' }}
           LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '168' }}
-          TOPIC_TTL_HOURS_INPUT: ${{ github.event.inputs.topic_ttl_hours || '24' }}
+          TOPIC_TTL_HOURS_INPUT: ${{ github.event.inputs.topic_ttl_hours || '12' }}
+          RELATED_HOURS_INPUT: ${{ github.event.inputs.related_hours || '12' }}
+          RELATED_LIMIT_INPUT: ${{ github.event.inputs.related_limit || '5' }}
           ACTIVE_START_HOUR_INPUT: ${{ github.event.inputs.active_start_hour || '8' }}
           ACTIVE_END_HOUR_INPUT: ${{ github.event.inputs.active_end_hour || '22' }}
           DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'false' }}
@@ -98,6 +108,8 @@ jobs:
             "--max-alerts", "$env:MAX_ALERTS_INPUT",
             "--lookback-hours", "$env:LOOKBACK_HOURS_INPUT",
             "--topic-ttl-hours", "$env:TOPIC_TTL_HOURS_INPUT",
+            "--related-hours", "$env:RELATED_HOURS_INPUT",
+            "--related-limit", "$env:RELATED_LIMIT_INPUT",
             "--active-start-hour", "$env:ACTIVE_START_HOUR_INPUT",
             "--active-end-hour", "$env:ACTIVE_END_HOUR_INPUT",
             "--mcp-command", "$mcpCommand",
