@@ -11,6 +11,7 @@ param(
     [int]$RelatedLimit = 5,
     [int]$ActiveStartHour = 8,
     [int]$ActiveEndHour = 22,
+    [string]$StateKey = "main",
     [string]$DryRun = "false",
     [string]$TriggerSource = "pc-negative-watch-main"
 )
@@ -51,6 +52,7 @@ $argsList = @(
     "--field", "related_limit=$RelatedLimit",
     "--field", "active_start_hour=$ActiveStartHour",
     "--field", "active_end_hour=$ActiveEndHour",
+    "--field", "state_key=$StateKey",
     "--field", "dry_run=$(Convert-ToWorkflowBool $DryRun)",
     "--field", "trigger_source=$TriggerSource"
 )
@@ -75,6 +77,7 @@ $logObject = [ordered]@{
     related_limit = $RelatedLimit
     active_start_hour = $ActiveStartHour
     active_end_hour = $ActiveEndHour
+    state_key = $StateKey
     dry_run = (Convert-ToWorkflowBool $DryRun)
     trigger_source = $TriggerSource
     workflow = $Workflow

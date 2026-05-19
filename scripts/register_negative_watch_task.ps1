@@ -13,6 +13,8 @@ param(
     [int]$RelatedLimit = 5,
     [int]$ActiveStartHour = 8,
     [int]$ActiveEndHour = 22,
+    [string]$StateKey = "main",
+    [string]$TriggerSource = "pc-negative-watch-main",
     [switch]$DryRun,
     [switch]$StartNow
 )
@@ -53,8 +55,9 @@ $arguments = @(
     "-RelatedLimit", "$RelatedLimit",
     "-ActiveStartHour", "$ActiveStartHour",
     "-ActiveEndHour", "$ActiveEndHour",
+    "-StateKey", "`"$StateKey`"",
     "-DryRun", "$dryRunValue",
-    "-TriggerSource", "pc-negative-watch-main"
+    "-TriggerSource", "`"$TriggerSource`""
 )
 
 $startHour = (($ActiveStartHour % 24) + 24) % 24

@@ -13,6 +13,10 @@ on:
         description: "KakaoTalk room to receive alerts."
         required: false
         default: "AI 병무청 데일리 모닝톡"
+      state_key:
+        description: "State/output key for dedupe isolation, for example main or test."
+        required: false
+        default: "main"
       max_alerts:
         description: "Maximum alert messages to send in one run."
         required: false
@@ -60,8 +64,9 @@ jobs:
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
       TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || 'AI 병무청 데일리 모닝톡' }}
-      NEGATIVE_WATCH_STATE: C:\omx\qwerty\.scheduler\negative-news-watch-main-seen.json
-      NEGATIVE_WATCH_OUTPUT_DIR: runs\negative-watch-main
+      NEGATIVE_WATCH_STATE_KEY: ${{ github.event.inputs.state_key || 'main' }}
+      NEGATIVE_WATCH_STATE: C:\omx\qwerty\.scheduler\negative-news-watch-${{ github.event.inputs.state_key || 'main' }}-seen.json
+      NEGATIVE_WATCH_OUTPUT_DIR: runs\negative-watch-${{ github.event.inputs.state_key || 'main' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -129,6 +134,7 @@ jobs:
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Negative MMA news watch" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target chatroom: $env:TARGET_CHATROOM" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- State key: $env:NEGATIVE_WATCH_STATE_KEY" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- State file: $env:NEGATIVE_WATCH_STATE" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Output dir: $env:NEGATIVE_WATCH_OUTPUT_DIR" -Encoding UTF8
 
@@ -136,4 +142,4 @@ jobs:
         if: always()
         with:
           name: negative-news-watch-runs
-          path: runs/negative-watch/
+          path: runs/negative-watch-*/
