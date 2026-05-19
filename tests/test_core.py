@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms, strip_html
+from scripts.filter_articles_by_summary_sources import extract_source_urls, filter_articles_by_source_urls
 from kakao_mma_news.summarize import (
     _load_json_object,
     _article_topic_key,
@@ -28,6 +29,26 @@ from scripts.watch_negative_news import (
 
 
 class CoreTests(unittest.TestCase):
+    def test_filter_articles_by_summary_sources(self):
+        articles = [
+            {"title": "excluded", "url": "https://example.com/excluded", "source": "example.com"},
+            {"title": "second", "url": "https://example.com/two?utm_source=x", "source": "example.com"},
+            {"title": "first", "url": "https://example.com/one", "source": "example.com"},
+        ]
+        summary = "\n".join(
+            [
+                "# 1 first",
+                "Source: https://example.com/one",
+                "# 2 second",
+                "Source: example.com / https://example.com/two",
+            ]
+        )
+
+        source_urls = extract_source_urls(summary)
+        selected = filter_articles_by_source_urls(articles, source_urls)
+
+        self.assertEqual([item["title"] for item in selected], ["first", "second"])
+
     def test_strip_html(self):
         self.assertEqual(strip_html("<b>병무청</b>&nbsp;뉴스<br>요약"), "병무청 뉴스 요약")
         self.assertEqual(

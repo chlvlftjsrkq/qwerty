@@ -232,11 +232,17 @@ jobs:
         shell: powershell
         run: |
           $articlesPath = Join-Path "runs" "articles-$env:TARGET_DATE_RESOLVED.json"
+          $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          $selectedArticlesPath = Join-Path "runs" "articles-$env:EPISODE_ID-selected.json"
           $imagePath = Join-Path "runs" "news-image-$env:EPISODE_ID.png"
           if (!(Test-Path $articlesPath)) {
             throw "No article JSON file found: $articlesPath"
           }
-          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$articlesPath" --output "$imagePath" --date "$env:TARGET_DATE_RESOLVED" --agency "$env:AGENCY_NAME" --limit 10
+          if (!(Test-Path $summaryPath)) {
+            throw "No summary Markdown file found: $summaryPath"
+          }
+          & $env:PYTHON_EXE scripts/filter_articles_by_summary_sources.py --articles "$articlesPath" --summary "$summaryPath" --output "$selectedArticlesPath"
+          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$selectedArticlesPath" --output "$imagePath" --date "$env:TARGET_DATE_RESOLVED" --agency "$env:AGENCY_NAME" --limit 10
 
       - name: Build podcast audio
         shell: powershell
