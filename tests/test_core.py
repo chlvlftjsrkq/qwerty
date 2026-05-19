@@ -440,6 +440,26 @@ class CoreTests(unittest.TestCase):
         self.assertIn("https://example.com/related-5", message)
         self.assertNotIn("https://example.com/related-6", message)
 
+    def test_negative_watch_summary_does_not_prefix_source_domain(self):
+        representative = NewsItem(
+            title="MC몽 병역 비리 의혹 재차 해명",
+            url="https://example.com/main",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T12:00:00+09:00",
+            summary="MC몽은 라이브 방송에서 병역 비리 의혹을 부인했다.",
+            query="병역비리",
+        )
+        message = build_alert_message(
+            representative,
+            classify_heuristic(representative),
+            [],
+            related_hours=12,
+        )
+        self.assertIn("핵심 내용", message)
+        self.assertIn("대표 기사에서는", message)
+        self.assertNotIn("example.com에서", message)
+
 
 if __name__ == "__main__":
     unittest.main()

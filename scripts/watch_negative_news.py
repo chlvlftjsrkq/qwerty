@@ -602,14 +602,13 @@ def trim_to_natural_sentence(text: str, limit: int = 150) -> str:
 
 
 def heuristic_alert_summary(item: NewsItem, category: str, matched_terms: list[str]) -> str:
-    source = item.source or "네이버 뉴스"
     snippet = trim_to_natural_sentence(item.summary or item.title, 135)
     if snippet and snippet != item.title:
-        return f"{source}에서 '{item.title}' 관련 보도를 냈습니다. 기사에서는 {snippet} 등의 내용을 다루고 있습니다."
+        return f"대표 기사에서는 {snippet} 등의 내용을 다루고 있습니다."
     terms = compact_terms(matched_terms, 3)
     if terms:
-        return f"{source}에서 '{item.title}' 보도를 냈습니다. {terms} 표현이 함께 확인돼 {category}로 분류했습니다."
-    return f"{source}에서 '{item.title}' 보도를 냈습니다. 병역 관련 부정 이슈로 번질 가능성이 있어 확인 대상으로 분류했습니다."
+        return f"대표 기사에서 {terms} 표현이 함께 확인돼 {category}로 분류했습니다."
+    return "대표 기사는 병역 관련 부정 이슈로 번질 가능성이 있어 확인 대상으로 분류했습니다."
 
 
 def alert_reason_sentence(matched_terms: list[str]) -> str:
