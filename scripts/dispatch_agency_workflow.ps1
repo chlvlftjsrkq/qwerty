@@ -9,8 +9,10 @@ param(
     [int]$AgencyIndex = -1,
     [string]$SendSummary = "true",
     [string]$SendPodcast = "true",
+    [string]$SendImage = "true",
     [string]$IncludeWeatherInSummary = "true",
     [string]$ArchiveResults = "true",
+    [string]$TargetChatroom = "",
     [string]$TriggerSource = "pc-scheduler-0807"
 )
 
@@ -82,11 +84,15 @@ $argsList = @(
     "--field", "trigger_source=$TriggerSource",
     "--field", "send_summary=$(Convert-ToWorkflowBool $SendSummary)",
     "--field", "send_podcast=$(Convert-ToWorkflowBool $SendPodcast)",
+    "--field", "send_image=$(Convert-ToWorkflowBool $SendImage)",
     "--field", "include_weather_in_summary=$(Convert-ToWorkflowBool $IncludeWeatherInSummary)",
     "--field", "archive_results=$(Convert-ToWorkflowBool $ArchiveResults)"
 )
 if (![string]::IsNullOrWhiteSpace($TargetDate)) {
     $argsList += @("--field", "target_date=$TargetDate")
+}
+if (![string]::IsNullOrWhiteSpace($TargetChatroom)) {
+    $argsList += @("--field", "target_chatroom=$TargetChatroom")
 }
 
 Set-Location $Root

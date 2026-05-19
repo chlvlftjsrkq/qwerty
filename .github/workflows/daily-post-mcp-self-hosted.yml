@@ -1,11 +1,8 @@
-name: Daily MMA News Kakao Post via MCP
+name: Agency News Talk Briefing Kakao Post via MCP
 
-run-name: Daily MMA News Kakao Post via MCP - ${{ github.event_name == 'schedule' && 'github-cron-0815' || github.event.inputs.trigger_source || github.event.inputs.agency || github.event.inputs.agency_index || 'auto' }}
+run-name: Agency News Talk Briefing Kakao Post via MCP - ${{ github.event.inputs.trigger_source || github.event.inputs.agency || github.event.inputs.agency_index || 'auto' }}
 
 on:
-  schedule:
-    # 08:15 KST daily backup trigger. GitHub cron is UTC.
-    - cron: "15 23 * * *"
   workflow_dispatch:
     inputs:
       trigger_source:
@@ -44,6 +41,15 @@ on:
         type: boolean
         required: false
         default: true
+      send_image:
+        description: "카카오톡에 기사 대표 이미지 합본을 첨부합니다."
+        type: boolean
+        required: false
+        default: true
+      target_chatroom:
+        description: "테스트용 채팅방 이름입니다. 비우면 Repository variable TARGET_CHATROOM을 사용합니다."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -53,7 +59,7 @@ jobs:
     runs-on: [self-hosted, Windows, X64, kakao, qwerty]
     timeout-minutes: 30
     concurrency:
-      group: daily-mma-news-kakao-post
+      group: daily-agency-news-kakao-post
       cancel-in-progress: false
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
@@ -99,11 +105,6 @@ jobs:
           } elseif (![string]::IsNullOrWhiteSpace($indexInput) -and $indexInput -ne "auto") {
             $selectedIndex = [int]$indexInput
             $selectedIndex = (($selectedIndex % $agencies.Count) + $agencies.Count) % $agencies.Count
-          } elseif ($env:GITHUB_EVENT_NAME -eq "schedule") {
-            $cronAgencyName = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("7IK87ISx7KCE7J6Q"))
-            $cronWeatherLocation = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("7IiY7JuQ"))
-            $cronWeatherLatitude = "37.2636"
-            $cronWeatherLongitude = "127.0286"
           } else {
             $kst = [System.TimeZoneInfo]::FindSystemTimeZoneById("Korea Standard Time")
             $nowKst = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $kst)
@@ -125,21 +126,21 @@ jobs:
             $weatherLocation = [string]$selected.weather_location
             $weatherLatitude = [string]$selected.weather_latitude
             $weatherLongitude = [string]$selected.weather_longitude
+            $selectedQueryTerms = @($selected.query_terms)
+            $selectedRequiredTerms = @($selected.required_terms)
           } elseif (![string]::IsNullOrWhiteSpace($cronAgencyName)) {
             $agencyName = $cronAgencyName
             $weatherLocation = $cronWeatherLocation
             $weatherLatitude = $cronWeatherLatitude
             $weatherLongitude = $cronWeatherLongitude
+            $selectedQueryTerms = @()
+            $selectedRequiredTerms = @()
           } else {
             throw "No agency target was selected."
           }
           $triggerSource = "$env:TRIGGER_SOURCE_INPUT".Trim()
           if ([string]::IsNullOrWhiteSpace($triggerSource)) {
-            if ($env:GITHUB_EVENT_NAME -eq "schedule") {
-              $triggerSource = "github-cron-0815"
-            } else {
-              $triggerSource = "manual-dispatch"
-            }
+            $triggerSource = "manual-dispatch"
           }
           $agencySlug = ($agencyName -replace "[^\p{L}\p{Nd}]+", "-").Trim("-")
           if ([string]::IsNullOrWhiteSpace($agencySlug)) {
@@ -155,7 +156,8 @@ jobs:
           }
 
           $episodeId = "$targetDate-$agencySlug"
-          $queryTerms = $agencyName
+          $queryTerms = if ($selectedQueryTerms.Count -gt 0) { [string]::Join(",", $selectedQueryTerms) } else { $agencyName }
+          $requiredTerms = if ($selectedRequiredTerms.Count -gt 0) { [string]::Join(",", $selectedRequiredTerms) } else { $agencyName }
           $includeWeather = if ("$env:INCLUDE_WEATHER_INPUT".Trim().ToLowerInvariant() -eq "false") { "false" } else { "true" }
 
           $envLines = @(
@@ -165,7 +167,7 @@ jobs:
             "EPISODE_ID=$episodeId",
             "TARGET_DATE_RESOLVED=$targetDate",
             "NEWS_QUERY_TERMS=$queryTerms",
-            "NEWS_REQUIRED_TERMS=$agencyName",
+            "NEWS_REQUIRED_TERMS=$requiredTerms",
             "TRIGGER_SOURCE=$triggerSource",
             "WEATHER_ENABLED=$includeWeather",
             "WEATHER_LOCATION=$weatherLocation",
@@ -226,6 +228,16 @@ jobs:
           )
           & $env:PYTHON_EXE @argsList
 
+      - name: Build article image sheet
+        shell: powershell
+        run: |
+          $articlesPath = Join-Path "runs" "articles-$env:TARGET_DATE_RESOLVED.json"
+          $imagePath = Join-Path "runs" "news-image-$env:EPISODE_ID.png"
+          if (!(Test-Path $articlesPath)) {
+            throw "No article JSON file found: $articlesPath"
+          }
+          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$articlesPath" --output "$imagePath" --date "$env:TARGET_DATE_RESOLVED" --agency "$env:AGENCY_NAME" --limit 10
+
       - name: Build podcast audio
         shell: powershell
         env:
@@ -256,7 +268,7 @@ jobs:
           [System.IO.File]::WriteAllText($messagePath, "$label`n$listenUrl", $utf8NoBom)
 
       - name: Archive summary to repository
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.archive_results == 'true' }}
+        if: ${{ github.event.inputs.archive_results == 'true' }}
         shell: powershell
         run: |
           $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
@@ -330,10 +342,10 @@ jobs:
           }
 
       - name: Post summary to KakaoTalk
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.send_summary == 'true' }}
+        if: ${{ github.event.inputs.send_summary == 'true' }}
         shell: powershell
         env:
-          TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
+          TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
             throw "Repository variable TARGET_CHATROOM is required."
@@ -348,11 +360,27 @@ jobs:
           }
           & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand" --verify
 
-      - name: Post podcast link to KakaoTalk
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.send_podcast == 'true' }}
+      - name: Post article image to KakaoTalk
+        if: ${{ github.event.inputs.send_image == 'true' }}
         shell: powershell
         env:
-          TARGET_CHATROOM: ${{ vars.TARGET_CHATROOM }}
+          TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
+            throw "Repository variable TARGET_CHATROOM or workflow input target_chatroom is required."
+          }
+          $imagePath = Join-Path "runs" "news-image-$env:EPISODE_ID.png"
+          if (!(Test-Path $imagePath)) {
+            throw "No article image file found: $imagePath"
+          }
+          $screenshotPath = Join-Path "runs" "kakao-image-post-$env:EPISODE_ID.png"
+          & $env:PYTHON_EXE scripts/post_kakao_image_attach.py --room "$env:TARGET_CHATROOM" --image "$imagePath" --screenshot "$screenshotPath"
+
+      - name: Post podcast link to KakaoTalk
+        if: ${{ github.event.inputs.send_podcast == 'true' }}
+        shell: powershell
+        env:
+          TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
             throw "Repository variable TARGET_CHATROOM is required."
@@ -383,5 +411,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mma-news-runs-${{ env.EPISODE_ID }}
+          name: agency-news-runs-${{ env.EPISODE_ID }}
           path: runs/

@@ -169,6 +169,30 @@
       "weather_location": "세종",
       "weather_latitude": 36.4800,
       "weather_longitude": 127.2890
+    },
+    {
+      "kst_hour": 8,
+      "agency": "인천병무지청",
+      "weather_location": "인천",
+      "weather_latitude": 37.4563,
+      "weather_longitude": 126.7052,
+      "query_terms": [
+        "인천병무지청",
+        "인천 병무청",
+        "경인지방병무청"
+      ],
+      "required_terms": [
+        "인천병무지청",
+        "인천병무청",
+        "경인지방병무청"
+      ]
+    },
+    {
+      "kst_hour": 9,
+      "agency": "삼성전자",
+      "weather_location": "수원",
+      "weather_latitude": 37.2636,
+      "weather_longitude": 127.0286
     }
   ]
 }

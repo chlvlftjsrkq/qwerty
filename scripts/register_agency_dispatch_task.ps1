@@ -8,8 +8,10 @@ param(
     [string]$TargetDate = "",
     [switch]$NoSummary,
     [switch]$NoPodcast,
+    [switch]$NoImage,
     [switch]$NoArchive,
     [switch]$NoWeatherInSummary,
+    [string]$TargetChatroom = "",
     [switch]$StartNow
 )
 
@@ -26,6 +28,7 @@ if (!(Test-Path -LiteralPath $GhExe)) {
 
 $sendSummaryArg = if ($NoSummary) { 'false' } else { 'true' }
 $sendPodcastArg = if ($NoPodcast) { 'false' } else { 'true' }
+$sendImageArg = if ($NoImage) { 'false' } else { 'true' }
 $includeWeatherArg = if ($NoWeatherInSummary) { 'false' } else { 'true' }
 $archiveResultsArg = if ($NoArchive) { 'false' } else { 'true' }
 
@@ -39,11 +42,15 @@ $arguments = @(
     "-GhExe", "`"$GhExe`"",
     "-SendSummary", $sendSummaryArg,
     "-SendPodcast", $sendPodcastArg,
+    "-SendImage", $sendImageArg,
     "-IncludeWeatherInSummary", $includeWeatherArg,
     "-ArchiveResults", $archiveResultsArg
 )
 if (![string]::IsNullOrWhiteSpace($TargetDate)) {
     $arguments += @("-TargetDate", "`"$TargetDate`"")
+}
+if (![string]::IsNullOrWhiteSpace($TargetChatroom)) {
+    $arguments += @("-TargetChatroom", "`"$TargetChatroom`"")
 }
 
 $action = New-ScheduledTaskAction `
