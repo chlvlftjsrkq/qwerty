@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="PNG path to write")
     parser.add_argument("--date", required=True, help="Target date label")
     parser.add_argument("--agency", required=True, help="Agency or keyword label")
+    parser.add_argument("--title", default="", help="Optional custom title for the image sheet")
     parser.add_argument("--limit", type=int, default=10, help="Maximum articles/images")
     parser.add_argument("--timeout", type=float, default=12.0, help="HTTP timeout in seconds")
     return parser.parse_args()
@@ -205,7 +206,7 @@ def collect_records(articles: list[dict[str, Any]], asset_dir: Path, limit: int,
     return records
 
 
-def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, agency: str) -> None:
+def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, agency: str, title: str = "") -> None:
     width = 1500
     margin = 54
     gap = 30
@@ -215,9 +216,7 @@ def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, 
     inner = 22
     title_font = load_font(31, bold=True)
     source_font = load_font(22)
-    header_font = load_font(52, bold=True)
-    subtitle_font = load_font(26)
-    small_font = load_font(20)
+    header_font = load_font(48, bold=True)
 
     measure = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     card_heights: list[int] = []
@@ -229,14 +228,17 @@ def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, 
     row_heights: list[int] = []
     for row in range((len(records) + columns - 1) // columns):
         row_heights.append(max(card_heights[row * columns : row * columns + columns]))
-    header_height = 178
-    footer_height = 58
-    height = header_height + sum(row_heights) + gap * max(0, len(row_heights) - 1) + footer_height + margin
+    header_title = normalize_space(title) or f"{date_label} {agency} 뉴스 이미지 모음"
+    header_lines = wrap_text(measure, header_title, header_font, width - margin * 2)
+    header_height = 44 + max(1, len(header_lines)) * 58 + 34
+    height = header_height + sum(row_heights) + gap * max(0, len(row_heights) - 1) + margin
 
     canvas = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(canvas)
-    draw.text((margin, 42), f"{date_label} {agency} 뉴스 이미지 모음", fill=TEXT, font=header_font)
-    draw.text((margin, 110), "네이버 뉴스 기사 대표 이미지를 한 장으로 모았습니다.", fill=MUTED, font=subtitle_font)
+    header_y = 36
+    for line in header_lines:
+        draw.text((margin, header_y), line, fill=TEXT, font=header_font)
+        header_y += 58
     draw.line((margin, header_height - 24, width - margin, header_height - 24), fill=BORDER, width=2)
 
     y = header_height
@@ -275,7 +277,6 @@ def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, 
             draw.text((x + inner, y + card_h - inner - 26), source, fill=MUTED, font=source_font)
         y += row_height + gap
 
-    draw.text((margin, height - 48), "Image sheet generated from collected news article pages.", fill=MUTED, font=small_font)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path)
 
@@ -302,7 +303,7 @@ def main() -> int:
         ]
 
     records = collect_records(selected, asset_dir, args.limit, args.timeout)
-    build_sheet(records, output_path, args.date, args.agency)
+    build_sheet(records, output_path, args.date, args.agency, args.title)
     report_path = output_path.with_suffix(".json")
     report_path.write_text(json.dumps([record.__dict__ for record in records], ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(output_path), "records": len(records), "report": str(report_path)}, ensure_ascii=False, indent=2))

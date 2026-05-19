@@ -943,6 +943,8 @@ def generate_alert_image(
         published.strftime("%Y-%m-%d"),
         "--agency",
         "병무청 이슈",
+        "--title",
+        item.title,
         "--limit",
         str(min(10, len(articles))),
     ]
