@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -96,6 +97,42 @@ SOFT_EXCLUDE_TERMS = [
     "홍보",
 ]
 
+GENERIC_TOPIC_WORDS = {
+    "가수",
+    "배우",
+    "연예인",
+    "아이돌",
+    "래퍼",
+    "유튜버",
+    "방송인",
+    "병무청",
+    "병역",
+    "병역기피",
+    "병역비리",
+    "병역법",
+    "위반",
+    "의혹",
+    "논란",
+    "해명",
+    "무죄",
+    "재판",
+    "검찰",
+    "송치",
+    "기소",
+    "수사",
+    "단독",
+    "영상",
+    "오늘연예",
+}
+
+ISSUE_FAMILIES = [
+    ("병역논란", ("병역기피", "병역 기피", "병역비리", "병역 비리", "병역법 위반", "고의발치", "발치몽")),
+    ("허위진단서", ("허위진단서", "허위 진단서", "정신질환 가장", "4급 판정", "재병역판정검사")),
+    ("수사재판", ("수사", "송치", "기소", "검찰", "재판", "공판", "유죄", "징역", "집행유예", "고발")),
+    ("사회복무요원관리", ("사회복무요원", "공익", "근무태만", "부실관리", "징계")),
+    ("기관논란", ("감사", "논란", "의혹", "비판")),
+]
+
 
 @dataclass(frozen=True)
 class NewsItem:
@@ -158,13 +195,15 @@ def parse_datetime(value: object) -> datetime | None:
 
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"seen_urls": {}, "last_checked_at": ""}
+        return {"seen_urls": {}, "seen_topics": {}, "last_checked_at": ""}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return {"seen_urls": {}, "last_checked_at": ""}
+        return {"seen_urls": {}, "seen_topics": {}, "last_checked_at": ""}
     if not isinstance(data.get("seen_urls"), dict):
         data["seen_urls"] = {}
+    if not isinstance(data.get("seen_topics"), dict):
+        data["seen_topics"] = {}
     return data
 
 
@@ -264,6 +303,104 @@ def within_lookback(item: NewsItem, lookback_hours: int, now: datetime) -> bool:
     except ValueError:
         return True
     return published >= now - timedelta(hours=lookback_hours)
+
+
+def parse_iso_datetime(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=KST)
+    return dt.astimezone(KST)
+
+
+def prune_seen_topics(seen_topics: dict[str, str], now: datetime, ttl_hours: int) -> dict[str, str]:
+    if ttl_hours <= 0:
+        return seen_topics
+    cutoff = now - timedelta(hours=ttl_hours)
+    pruned: dict[str, str] = {}
+    for key, value in seen_topics.items():
+        seen_at = parse_iso_datetime(value)
+        if seen_at is None or seen_at >= cutoff:
+            pruned[key] = value
+    return pruned
+
+
+def normalize_topic_token(value: str) -> str:
+    token = re.sub(r"[\[\]{}()（）<>〈〉'\"“”‘’.,!?·ㆍ:;|/\\]", " ", value)
+    token = re.sub(r"\s+", "", token).casefold()
+    return token
+
+
+def issue_family(text: str, matched_terms: list[str]) -> str:
+    compact = normalize_topic_token(text)
+    matched_compact = {normalize_topic_token(term) for term in matched_terms}
+    for family, terms in ISSUE_FAMILIES:
+        if any(normalize_topic_token(term) in compact for term in terms):
+            return family
+        if any(normalize_topic_token(term) in matched_compact for term in terms):
+            return family
+    return "병역이슈"
+
+
+def extract_topic_entity(item: NewsItem) -> str:
+    text = clean_text(f"{item.title} {item.summary}")
+    title = re.sub(r"^\[[^\]]+\]\s*", "", item.title).strip()
+    token_sources = [title, text]
+    candidates: list[str] = []
+    for source in token_sources:
+        for token in re.findall(r"[A-Za-z]{1,8}[가-힣]{1,8}|[가-힣]{2,5}", source):
+            normalized = normalize_topic_token(token)
+            if not normalized or normalized in {normalize_topic_token(word) for word in GENERIC_TOPIC_WORDS}:
+                continue
+            if re.fullmatch(r"\d+", normalized):
+                continue
+            candidates.append(token)
+        if candidates:
+            break
+
+    if not candidates:
+        return ""
+
+    def score_token(token: str) -> tuple[int, int]:
+        normalized = normalize_topic_token(token)
+        score = 0
+        if re.search(r"[A-Za-z]", token) and re.search(r"[가-힣]", token):
+            score += 8
+        if title.startswith(token):
+            score += 4
+        if normalized in normalize_topic_token(title[:40]):
+            score += 2
+        score += normalize_topic_token(text).count(normalized)
+        return score, -len(token)
+
+    # Prefer distinctive named subjects such as "MC몽" even when another person
+    # appears first in a reaction article.
+    return sorted(candidates, key=score_token, reverse=True)[0]
+
+
+def topic_fingerprint(item: NewsItem, classification: Classification) -> str:
+    text = f"{item.title} {item.summary}"
+    entity = normalize_topic_token(extract_topic_entity(item))
+    family = issue_family(text, classification.matched_terms)
+    if entity:
+        base = f"{entity}:{family}"
+    else:
+        tokens = [
+            normalize_topic_token(token)
+            for token in re.findall(r"[A-Za-z]{1,8}[가-힣]{1,8}|[가-힣]{2,6}", text)
+        ]
+        filtered = [
+            token
+            for token in tokens
+            if token and token not in {normalize_topic_token(word) for word in GENERIC_TOPIC_WORDS}
+        ][:4]
+        base = f"{family}:{':'.join(filtered) or normalize_topic_token(item.title)[:40]}"
+    digest = hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
+    return f"{family}:{digest}"
 
 
 def classify_heuristic(item: NewsItem) -> Classification:
@@ -642,6 +779,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--display", type=int, default=int(os.getenv("NEGATIVE_WATCH_DISPLAY", "50")))
     parser.add_argument("--pages", type=int, default=int(os.getenv("NEGATIVE_WATCH_PAGES", "2")))
     parser.add_argument("--lookback-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_LOOKBACK_HOURS", "168")))
+    parser.add_argument("--topic-ttl-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_TOPIC_TTL_HOURS", "168")))
     parser.add_argument("--max-alerts", type=int, default=int(os.getenv("NEGATIVE_WATCH_MAX_ALERTS", "1")))
     parser.add_argument("--dry-run", action="store_true", help="Do not send KakaoTalk messages or update state")
     parser.add_argument("--verify", action="store_true", help="Verify posted KakaoTalk alert")
@@ -674,6 +812,11 @@ def main() -> int:
     now = datetime.now(KST)
     state = load_state(state_path)
     seen_urls: dict[str, str] = state.get("seen_urls", {})
+    seen_topics: dict[str, str] = prune_seen_topics(
+        state.get("seen_topics", {}),
+        now,
+        args.topic_ttl_hours,
+    )
 
     fetched: list[NewsItem] = []
     errors: list[str] = []
@@ -704,19 +847,42 @@ def main() -> int:
         if (item.url or item.naver_url or item.title) not in seen_urls
     ]
 
-    heuristic_pairs: list[tuple[NewsItem, Classification]] = []
+    # Older state files only had URL-level dedupe. Rebuild issue-level topics
+    # from URLs we have already seen and that still appear in the Naver window.
+    for item in items:
+        key = item.url or item.naver_url or item.title
+        if key not in seen_urls:
+            continue
+        classification = classify_heuristic(item)
+        if classification.score <= 0:
+            continue
+        seen_topics.setdefault(topic_fingerprint(item, classification), seen_urls[key])
+
+    raw_pairs: list[tuple[NewsItem, Classification, str]] = []
     inspected_keys: list[str] = []
     for item in new_items:
         classification = classify_heuristic(item)
         if classification.score <= 0:
             continue
         inspected_keys.append(item.url or item.naver_url or item.title)
-        heuristic_pairs.append((item, classification))
+        raw_pairs.append((item, classification, topic_fingerprint(item, classification)))
 
-    heuristic_pairs.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
+    raw_pairs.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
 
-    classified: list[tuple[NewsItem, Classification]] = []
-    for index, (item, classification) in enumerate(heuristic_pairs):
+    heuristic_pairs: list[tuple[NewsItem, Classification, str]] = []
+    run_topics: set[str] = set()
+    topic_duplicate_count = 0
+    inspected_topics: list[str] = []
+    for item, classification, topic_key in raw_pairs:
+        inspected_topics.append(topic_key)
+        if topic_key in seen_topics or topic_key in run_topics:
+            topic_duplicate_count += 1
+            continue
+        run_topics.add(topic_key)
+        heuristic_pairs.append((item, classification, topic_key))
+
+    classified: list[tuple[NewsItem, Classification, str]] = []
+    for index, (item, classification, topic_key) in enumerate(heuristic_pairs):
         if (
             args.summary_provider.lower() == "codex"
             and classification.score >= 5
@@ -731,11 +897,11 @@ def main() -> int:
                 output_dir=output_dir,
             )
         if classification.send:
-            classified.append((item, classification))
+            classified.append((item, classification, topic_key))
 
     classified.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
     alerts = classified[: max(0, args.max_alerts)]
-    messages = [build_alert_message(item, classification) for item, classification in alerts]
+    messages = [build_alert_message(item, classification) for item, classification, _topic_key in alerts]
 
     timestamp = now.strftime("%Y%m%d-%H%M%S")
     candidates_path = output_dir / f"candidates-{timestamp}.json"
@@ -748,10 +914,16 @@ def main() -> int:
                 "fetched_count": len(fetched),
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
+                "topic_duplicate_count": topic_duplicate_count,
+                "seen_topic_count": len(seen_topics),
                 "alert_count": len(alerts),
                 "alerts": [
-                    {"article": asdict(item), "classification": asdict(classification)}
-                    for item, classification in alerts
+                    {
+                        "article": asdict(item),
+                        "classification": asdict(classification),
+                        "topic_key": topic_key,
+                    }
+                    for item, classification, topic_key in alerts
                 ],
                 "sample_candidates": [asdict(item) for item in new_items[:20]],
             },
@@ -769,20 +941,25 @@ def main() -> int:
 
         for key in inspected_keys:
             seen_urls[key] = now.isoformat()
-        for item, _classification in alerts:
+        for topic_key in inspected_topics:
+            seen_topics[topic_key] = now.isoformat()
+        for item, _classification, topic_key in alerts:
             seen_urls[item.url or item.naver_url or item.title] = now.isoformat()
+            seen_topics[topic_key] = now.isoformat()
         state["seen_urls"] = dict(list(seen_urls.items())[-2000:])
+        state["seen_topics"] = dict(list(seen_topics.items())[-2000:])
         state["last_checked_at"] = now.isoformat()
         save_state(state_path, state)
 
         alerts_log = output_dir / f"alerts-{now.strftime('%Y-%m-%d')}.jsonl"
         with alerts_log.open("a", encoding="utf-8") as log_file:
-            for item, classification in alerts:
+            for item, classification, topic_key in alerts:
                 log_file.write(
                     json.dumps(
                         {
                             "posted_at": now.isoformat(),
                             "room": args.room,
+                            "topic_key": topic_key,
                             "article": asdict(item),
                             "classification": asdict(classification),
                         },
@@ -799,6 +976,8 @@ def main() -> int:
                 "fetched_count": len(fetched),
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
+                "topic_duplicate_count": topic_duplicate_count,
+                "seen_topic_count": len(seen_topics),
                 "candidate_path": str(candidates_path),
                 "alert_count": len(alerts),
                 "posted": posted,

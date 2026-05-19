@@ -16,6 +16,7 @@ from kakao_mma_news.summarize import (
 )
 from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import markdown_to_speech
+from scripts.watch_negative_news import NewsItem, classify_heuristic, topic_fingerprint
 
 
 class CoreTests(unittest.TestCase):
@@ -324,6 +325,44 @@ class CoreTests(unittest.TestCase):
         )
         self.assertIn("주요 기사가 확인되지 않았습니다.", speech)
         self.assertNotIn("많지 않았습니다", speech)
+
+    def test_negative_watch_groups_same_person_issue(self):
+        first = NewsItem(
+            title="MC몽, '발치몽' 이미지 억울함 토로 \"대법원까지 무죄\"",
+            url="https://example.com/a",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T12:00:00+09:00",
+            summary="가수 MC몽이 병역비리 의혹과 병역법 위반 무죄 판결을 해명했다.",
+            query="병역비리",
+        )
+        second = NewsItem(
+            title="[오늘연예] MC몽, 병역 비리 의혹 재차 해명",
+            url="https://example.com/b",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T12:05:00+09:00",
+            summary="MC몽은 라이브 방송에서 과거 병역 기피 논란에 관해 입장을 밝혔다.",
+            query="병역기피 연예인",
+        )
+        self.assertEqual(
+            topic_fingerprint(first, classify_heuristic(first)),
+            topic_fingerprint(second, classify_heuristic(second)),
+        )
+
+        reaction = NewsItem(
+            title="김민종, MC몽 병역 비리 관련 주장 반박",
+            url="https://example.com/c",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-19T12:10:00+09:00",
+            summary="김민종은 MC몽이 언급한 내용을 반박했고, 기사에서는 병역 비리 논란도 함께 다뤘다.",
+            query="병역비리",
+        )
+        self.assertEqual(
+            topic_fingerprint(first, classify_heuristic(first)),
+            topic_fingerprint(reaction, classify_heuristic(reaction)),
+        )
 
 
 if __name__ == "__main__":
