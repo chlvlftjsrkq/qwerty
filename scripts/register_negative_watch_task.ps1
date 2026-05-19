@@ -45,32 +45,80 @@ $arguments = @(
     "-TriggerSource", "pc-negative-watch-5min-test"
 )
 
-$action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument ($arguments -join " ") `
-    -WorkingDirectory $Root
-
 $startHour = (($ActiveStartHour % 24) + 24) % 24
 $endHour = (($ActiveEndHour % 24) + 24) % 24
 $durationHours = if ($endHour -gt $startHour) { $endHour - $startHour } elseif ($endHour -lt $startHour) { 24 - $startHour + $endHour } else { 24 }
 $startAt = (Get-Date).Date.AddHours($startHour)
-$trigger = New-ScheduledTaskTrigger -Daily -At $startAt `
-    -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
-    -RepetitionDuration (New-TimeSpan -Hours $durationHours)
 
-$settings = New-ScheduledTaskSettingsSet `
-    -StartWhenAvailable `
-    -WakeToRun `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries
+function Escape-Xml {
+    param([string]$Value)
+    return [System.Security.SecurityElement]::Escape($Value)
+}
 
-Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
-    -Description "Dispatches the qwerty negative MMA news watch workflow every $IntervalMinutes minutes." `
-    -Force | Out-Null
+$userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$argumentText = $arguments -join " "
+$startBoundary = $startAt.ToString("yyyy-MM-ddTHH:mm:ss")
+$intervalIso = "PT$($IntervalMinutes)M"
+$durationIso = "PT$($durationHours)H"
+$description = "Dispatches the qwerty negative MMA news watch workflow every $IntervalMinutes minutes from $($startHour):00 to $($endHour):00."
+
+$taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>$(Escape-Xml $description)</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <Repetition>
+        <Interval>$intervalIso</Interval>
+        <Duration>$durationIso</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>$startBoundary</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$(Escape-Xml $userId)</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>true</WakeToRun>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>$(Escape-Xml $argumentText)</Arguments>
+      <WorkingDirectory>$(Escape-Xml $Root)</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+
+Register-ScheduledTask -TaskName $TaskName -Xml $taskXml -Force | Out-Null
 
 Write-Host "Registered task: $TaskName"
 Write-Host "Interval minutes: $IntervalMinutes"
