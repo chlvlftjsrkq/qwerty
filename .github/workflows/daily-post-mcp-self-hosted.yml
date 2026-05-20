@@ -126,8 +126,8 @@ jobs:
             $weatherLocation = [string]$selected.weather_location
             $weatherLatitude = [string]$selected.weather_latitude
             $weatherLongitude = [string]$selected.weather_longitude
-            $selectedQueryTerms = @($selected.query_terms)
-            $selectedRequiredTerms = @($selected.required_terms)
+            $selectedQueryTerms = @($selected.query_terms | ForEach-Object { "$_".Trim() } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+            $selectedRequiredTerms = @($selected.required_terms | ForEach-Object { "$_".Trim() } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
           } elseif (![string]::IsNullOrWhiteSpace($cronAgencyName)) {
             $agencyName = $cronAgencyName
             $weatherLocation = $cronWeatherLocation
