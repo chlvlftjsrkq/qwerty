@@ -1267,7 +1267,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--generate-alert-image", action="store_true", default=os.getenv("NEGATIVE_WATCH_GENERATE_IMAGE", "").strip().lower() in {"1", "true", "yes", "y", "on"})
     parser.add_argument("--image-size", default=os.getenv("NEGATIVE_WATCH_IMAGE_SIZE", "1024x1024"))
     parser.add_argument("--image-open-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_OPEN_WAIT", "1.5")))
-    parser.add_argument("--image-send-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_SEND_WAIT", "5.0")))
+    parser.add_argument("--image-send-wait", type=float, default=float(os.getenv("NEGATIVE_WATCH_IMAGE_SEND_WAIT", "8.0")))
     parser.add_argument("--queries", default=os.getenv("NEGATIVE_WATCH_QUERIES", ""))
     parser.add_argument("--display", type=int, default=int(os.getenv("NEGATIVE_WATCH_DISPLAY", "50")))
     parser.add_argument("--pages", type=int, default=int(os.getenv("NEGATIVE_WATCH_PAGES", "2")))

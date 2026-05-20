@@ -361,7 +361,7 @@ jobs:
             throw "No article image file found: $imagePath"
           }
           $screenshotPath = Join-Path "runs" "kakao-image-post-$env:EPISODE_ID.png"
-          & $env:PYTHON_EXE scripts/post_kakao_image_attach.py --room "$env:TARGET_CHATROOM" --image "$imagePath" --screenshot "$screenshotPath"
+          & $env:PYTHON_EXE scripts/post_kakao_image_attach.py --room "$env:TARGET_CHATROOM" --image "$imagePath" --screenshot "$screenshotPath" --send-wait 8
 
       - name: Post summary to KakaoTalk
         if: ${{ github.event.inputs.send_summary == 'true' }}
