@@ -347,6 +347,22 @@ jobs:
             throw "Failed to archive summary after 3 attempts."
           }
 
+      - name: Post article image to KakaoTalk
+        if: ${{ github.event.inputs.send_image == 'true' }}
+        shell: powershell
+        env:
+          TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
+            throw "Repository variable TARGET_CHATROOM or workflow input target_chatroom is required."
+          }
+          $imagePath = Join-Path "runs" "news-image-$env:EPISODE_ID.png"
+          if (!(Test-Path $imagePath)) {
+            throw "No article image file found: $imagePath"
+          }
+          $screenshotPath = Join-Path "runs" "kakao-image-post-$env:EPISODE_ID.png"
+          & $env:PYTHON_EXE scripts/post_kakao_image_attach.py --room "$env:TARGET_CHATROOM" --image "$imagePath" --screenshot "$screenshotPath"
+
       - name: Post summary to KakaoTalk
         if: ${{ github.event.inputs.send_summary == 'true' }}
         shell: powershell
@@ -365,22 +381,6 @@ jobs:
             throw "kakaotalk-mcp executable was not found: $mcpCommand"
           }
           & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand" --verify
-
-      - name: Post article image to KakaoTalk
-        if: ${{ github.event.inputs.send_image == 'true' }}
-        shell: powershell
-        env:
-          TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
-            throw "Repository variable TARGET_CHATROOM or workflow input target_chatroom is required."
-          }
-          $imagePath = Join-Path "runs" "news-image-$env:EPISODE_ID.png"
-          if (!(Test-Path $imagePath)) {
-            throw "No article image file found: $imagePath"
-          }
-          $screenshotPath = Join-Path "runs" "kakao-image-post-$env:EPISODE_ID.png"
-          & $env:PYTHON_EXE scripts/post_kakao_image_attach.py --room "$env:TARGET_CHATROOM" --image "$imagePath" --screenshot "$screenshotPath"
 
       - name: Post podcast link to KakaoTalk
         if: ${{ github.event.inputs.send_podcast == 'true' }}
