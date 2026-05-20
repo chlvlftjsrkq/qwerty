@@ -12,6 +12,8 @@ import pyautogui
 import pyperclip
 from kakao_mcp import controller
 
+pyautogui.FAILSAFE = False
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Attach an image file to a KakaoTalk room via the PC Kakao UI.")
