@@ -601,14 +601,72 @@ def trim_to_natural_sentence(text: str, limit: int = 150) -> str:
     return shortened
 
 
-def heuristic_alert_summary(item: NewsItem, category: str, matched_terms: list[str]) -> str:
-    snippet = trim_to_natural_sentence(item.summary or item.title, 135)
-    if snippet and snippet != item.title:
-        return f"대표 기사에서는 {snippet} 등의 내용을 다루고 있습니다."
+def looks_like_clipped_korean_fragment(text: str) -> bool:
+    stripped = clean_text(text).lstrip(" \"'“”‘’([{")
+    if not stripped:
+        return True
+    bad_starts = (
+        "등은",
+        "등이",
+        "등을",
+        "등도",
+        "등과",
+        "등에",
+        "이라며",
+        "라며",
+        "며 ",
+        "고 ",
+        "또 ",
+        "또한 ",
+        "한편 ",
+        "하지만 ",
+        "그러나 ",
+        "이와 함께 ",
+    )
+    return stripped.startswith(bad_starts)
+
+
+def fallback_alert_summary(item: NewsItem, category: str, matched_terms: list[str]) -> str:
     terms = compact_terms(matched_terms, 3)
     if terms:
-        return f"대표 기사에서 {terms} 표현이 함께 확인돼 {category}로 분류했습니다."
-    return "대표 기사는 병역 관련 부정 이슈로 번질 가능성이 있어 확인 대상으로 분류했습니다."
+        return f"대표 기사에서 {terms} 관련 표현이 확인됐습니다. {category} 이슈로 번질 수 있어 내용을 확인할 필요가 있습니다."
+    return "대표 기사에서 병역 관련 부정 이슈로 번질 수 있는 내용이 확인됐습니다. 사실관계와 후속 보도를 함께 확인할 필요가 있습니다."
+
+
+def salvage_after_leading_fragment(text: str) -> str:
+    pieces = re.split(r"(?<=[.!?])\s+", clean_text(text), maxsplit=1)
+    if len(pieces) < 2:
+        return ""
+    candidate = pieces[1].strip()
+    if looks_like_clipped_korean_fragment(candidate) or len(candidate) < 18:
+        return ""
+    return candidate
+
+
+def polish_alert_summary(summary: str, item: NewsItem, category: str, matched_terms: list[str]) -> str:
+    text = remove_korean_particle_spacing(clean_text(summary))
+    text = re.sub(r"^(?:대표\s+)?기사(?:에서는|는)\s*", "", text).strip()
+    text = re.sub(r"^에서는\s*", "", text).strip()
+    text = re.sub(r"\s*등의 내용을 다루고 있습니다\.?$", ".", text).strip()
+    text = re.sub(r"\s*관련 보도를 냈습니다\.\s*기사(?:에서는|는)\s*", " ", text).strip()
+    if looks_like_clipped_korean_fragment(text):
+        salvaged = salvage_after_leading_fragment(text)
+        if salvaged:
+            text = salvaged
+        else:
+            return fallback_alert_summary(item, category, matched_terms)
+    if len(text) < 18:
+        return fallback_alert_summary(item, category, matched_terms)
+    if not re.search(r"[.!?]$", text):
+        text = f"{text}."
+    return text
+
+
+def heuristic_alert_summary(item: NewsItem, category: str, matched_terms: list[str]) -> str:
+    snippet = trim_to_natural_sentence(item.summary or item.title, 135)
+    if snippet and snippet != item.title and not looks_like_clipped_korean_fragment(snippet):
+        return polish_alert_summary(snippet, item, category, matched_terms)
+    return fallback_alert_summary(item, category, matched_terms)
 
 
 def alert_reason_sentence(matched_terms: list[str]) -> str:
@@ -696,6 +754,8 @@ def refine_with_codex(
             'Schema: {"send":true,"severity":"높음|보통|낮음","category":"분류","summary":"카카오톡에 넣을 자연스러운 경어체 요약 1~2문장","reason":"왜 확인 대상으로 잡았는지 자연스러운 한 문장"}',
             "Write like a concise Korean newsroom monitor alert, not a system log.",
             "Do not copy a clipped Naver API description verbatim. Rewrite it as a complete natural sentence.",
+            "The summary must start with the main actor or event, not with a clipped fragment such as 등은, 이라며, 라며, 또, 또한, 한편.",
+            "Do not use boilerplate such as 대표 기사에서는, 기사에서는, or 등의 내용을 다루고 있습니다.",
             "Do not use labels such as 감지어 in reason. Explain the monitoring reason in plain Korean.",
             "Do not use ellipses or unsupported facts.",
         ]
@@ -1124,7 +1184,7 @@ def build_alert_message(
         lead = "병역 관련 여론 이슈로 확산될 수 있는 보도가 확인됐습니다."
     elif classification.severity == "낮음":
         lead = "병역 관련 모니터링 후보 보도가 확인됐습니다."
-    summary = classification.summary
+    summary = polish_alert_summary(classification.summary, item, classification.category, classification.matched_terms)
     if related_items:
         summary = (
             f"{summary}\n"
