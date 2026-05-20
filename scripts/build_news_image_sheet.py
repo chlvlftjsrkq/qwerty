@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 
 USER_AGENT = "agency-news-talkbriefing/0.1 (+image-sheet)"
@@ -171,8 +171,21 @@ def placeholder_image(index: int, title: str, size: tuple[int, int]) -> Image.Im
     return image
 
 
-def cover_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
-    return ImageOps.fit(image.convert("RGB"), size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+def fit_image_without_crop(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    source = image.convert("RGB")
+    try:
+        background = ImageOps.fit(source, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        background = background.filter(ImageFilter.GaussianBlur(20))
+        wash = Image.new("RGB", size, (255, 255, 255))
+        canvas = Image.blend(background, wash, 0.62)
+    except Exception:
+        canvas = Image.new("RGB", size, CARD)
+
+    foreground = ImageOps.contain(source, size, method=Image.Resampling.LANCZOS)
+    x = (size[0] - foreground.size[0]) // 2
+    y = (size[1] - foreground.size[1]) // 2
+    canvas.paste(foreground, (x, y))
+    return canvas
 
 
 def draw_rounded_image(canvas: Image.Image, image: Image.Image, box: tuple[int, int, int, int], radius: int = 18) -> None:
@@ -256,7 +269,7 @@ def build_sheet(records: list[ImageRecord], output_path: Path, date_label: str, 
             if record.image_path and Path(record.image_path).exists():
                 try:
                     src = Image.open(record.image_path)
-                    img = cover_image(src, (image_box[2] - image_box[0], image_box[3] - image_box[1]))
+                    img = fit_image_without_crop(src, (image_box[2] - image_box[0], image_box[3] - image_box[1]))
                 except Exception:
                     img = placeholder_image(record.index, record.title, (image_box[2] - image_box[0], image_box[3] - image_box[1]))
             else:
