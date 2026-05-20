@@ -19,6 +19,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image", required=True, help="Image file to attach")
     parser.add_argument("--screenshot", default="", help="Optional screenshot path after sending")
     parser.add_argument("--open-wait", type=float, default=1.2)
+    parser.add_argument("--open-attempts", type=int, default=4)
+    parser.add_argument("--open-retry-wait", type=float, default=1.5)
     parser.add_argument("--send-wait", type=float, default=4.0)
     return parser.parse_args()
 
@@ -53,10 +55,32 @@ def open_dialog_visible() -> bool:
     return any(title in {"열기", "Open"} for _, title in enum_window_titles())
 
 
-def bring_room_to_front(room: str, wait: float) -> tuple[int, tuple[int, int, int, int], dict]:
-    open_result = controller.search_and_open_room(room)
-    time.sleep(wait)
-    hwnd = controller.find_chat_window(room)
+def bring_room_to_front(
+    room: str,
+    wait: float,
+    attempts: int,
+    retry_wait: float,
+) -> tuple[int, tuple[int, int, int, int], dict]:
+    open_result = {}
+    hwnd = None
+    for attempt in range(1, max(1, attempts) + 1):
+        open_result = controller.search_and_open_room(room)
+        time.sleep(wait)
+        hwnd = controller.find_chat_window(room)
+        if hwnd:
+            break
+        print(
+            json.dumps(
+                {
+                    "open_attempt": attempt,
+                    "room": room,
+                    "open_result": open_result,
+                    "open_windows": enum_window_titles(),
+                },
+                ensure_ascii=False,
+            )
+        )
+        time.sleep(retry_wait)
     if not hwnd:
         raise RuntimeError(f"KakaoTalk room window was not found: {room}")
     controller.bring_window_to_front(hwnd)
@@ -64,11 +88,19 @@ def bring_room_to_front(room: str, wait: float) -> tuple[int, tuple[int, int, in
     return int(hwnd), get_window_rect(hwnd), open_result
 
 
-def attach_image(room: str, image_path: Path, screenshot_path: Path | None, open_wait: float, send_wait: float) -> dict:
+def attach_image(
+    room: str,
+    image_path: Path,
+    screenshot_path: Path | None,
+    open_wait: float,
+    open_attempts: int,
+    open_retry_wait: float,
+    send_wait: float,
+) -> dict:
     if not image_path.exists():
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
-    hwnd, rect, open_result = bring_room_to_front(room, open_wait)
+    hwnd, rect, open_result = bring_room_to_front(room, open_wait, open_attempts, open_retry_wait)
     left, _top, _right, bottom = rect
 
     # PC Kakao places the file attachment icon near the lower-left of the chat window.
@@ -123,6 +155,8 @@ def main() -> int:
         image_path=Path(args.image).resolve(),
         screenshot_path=Path(args.screenshot).resolve() if args.screenshot else None,
         open_wait=args.open_wait,
+        open_attempts=args.open_attempts,
+        open_retry_wait=args.open_retry_wait,
         send_wait=args.send_wait,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

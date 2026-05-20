@@ -24,6 +24,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary", required=True, help="Path to summary Markdown file")
     parser.add_argument("--mcp-command", default="", help="kakaotalk-mcp executable path")
     parser.add_argument("--max-chars", type=int, default=3000, help="Maximum characters per KakaoTalk message")
+    parser.add_argument("--open-attempts", type=int, default=4, help="KakaoTalk room open retry attempts")
+    parser.add_argument("--open-retry-wait", type=float, default=1.5, help="Seconds to wait between room open retries")
     parser.add_argument("--verify", action="store_true", help="Read recent messages and verify the first chunk")
     return parser.parse_args()
 
@@ -50,6 +52,30 @@ async def call_tool(session: ClientSession, name: str, arguments: dict[str, Any]
     return parse_tool_json(result)
 
 
+async def open_room_with_retry(session: ClientSession, room: str, attempts: int, wait_seconds: float) -> dict[str, Any]:
+    last_result: dict[str, Any] = {}
+    attempts = max(1, attempts)
+    for attempt in range(1, attempts + 1):
+        open_result = await call_tool(session, "kakao_open_room", {"room_name": room})
+        last_result = open_result
+        if not open_result.get("error"):
+            return open_result
+        open_rooms = await call_tool(session, "kakao_list_open_rooms", {})
+        print(
+            json.dumps(
+                {
+                    "open_attempt": attempt,
+                    "open_result": open_result,
+                    "open_rooms": open_rooms,
+                },
+                ensure_ascii=False,
+            )
+        )
+        if attempt < attempts:
+            await asyncio.sleep(wait_seconds)
+    return last_result
+
+
 async def post_summary(args: argparse.Namespace) -> int:
     summary_path = Path(args.summary)
     if not summary_path.exists():
@@ -71,7 +97,12 @@ async def post_summary(args: argparse.Namespace) -> int:
                 print(json.dumps({"health": health}, ensure_ascii=False))
                 raise RuntimeError("KakaoTalk is not running on this Windows runner.")
 
-            open_result = await call_tool(session, "kakao_open_room", {"room_name": args.room})
+            open_result = await open_room_with_retry(
+                session,
+                args.room,
+                attempts=args.open_attempts,
+                wait_seconds=args.open_retry_wait,
+            )
             if open_result.get("error"):
                 print(json.dumps({"open_result": open_result}, ensure_ascii=False))
                 raise RuntimeError(f"Failed to open KakaoTalk room: {args.room}")
