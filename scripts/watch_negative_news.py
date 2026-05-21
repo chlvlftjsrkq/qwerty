@@ -31,6 +31,11 @@ DEFAULT_QUERIES = [
     "병무청 허위진단서",
     "병무청 연예인 병역",
     "병무청 사회복무요원 근무태만",
+    "사회복무요원 병역법 위반",
+    "사회복무요원 병역법",
+    "사회복무요원 부실 복무",
+    "사회복무요원 무단 결근",
+    "병역법 위반 사회복무요원",
     "병무청 수사",
     "병무청 송치",
     "병무청 기소",
@@ -62,6 +67,14 @@ STRONG_NEGATIVE_TERMS = {
     "집행유예": 4,
     "특별사법경찰": 4,
     "근무태만": 4,
+    "부실복무": 4,
+    "부실 복무": 4,
+    "무단결근": 5,
+    "무단 결근": 5,
+    "무단이탈": 5,
+    "무단 이탈": 5,
+    "복무이탈": 5,
+    "복무 이탈": 5,
     "부실관리": 4,
     "감사": 3,
     "징계": 4,
@@ -95,12 +108,19 @@ CORE_ISSUE_RELEVANCE_TERMS = (
     "병역법",
     "병역판정",
     "병역 판정",
+    "병역법 위반",
     "군면제",
     "군 면제",
     "허위진단서",
     "허위 진단서",
     "사회복무요원",
     "공익",
+    "부실복무",
+    "부실 복무",
+    "무단결근",
+    "무단 결근",
+    "복무이탈",
+    "복무 이탈",
     "특별사법경찰",
     "고의발치",
     "발치",
@@ -208,10 +228,14 @@ def parse_datetime(value: object) -> datetime | None:
     if isinstance(value, datetime):
         dt = value
     else:
+        text = str(value).strip()
         try:
-            dt = parsedate_to_datetime(str(value))
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except (TypeError, ValueError):
-            return None
+            try:
+                dt = parsedate_to_datetime(text)
+            except (TypeError, ValueError):
+                return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=KST)
     return dt.astimezone(KST)
@@ -371,11 +395,11 @@ def dedupe_items(items: list[NewsItem]) -> list[NewsItem]:
 
 def within_lookback(item: NewsItem, lookback_hours: int, now: datetime) -> bool:
     if not item.published_at:
-        return True
+        return False
     try:
         published = datetime.fromisoformat(item.published_at).astimezone(KST)
     except ValueError:
-        return True
+        return False
     return published >= now - timedelta(hours=lookback_hours)
 
 
