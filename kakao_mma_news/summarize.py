@@ -84,20 +84,15 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
         "target_date": target_date.isoformat(),
         "format": (
             f"🪖 YYYY-MM-DD {agency_name} 뉴스 브리핑\n"
-            "---\n\n"
             f"오늘의 {agency_name} 뉴스 톡 📡\n"
-            "# 1️⃣ 기사 제목\n"
+            "1️⃣ 기사 제목\n"
             "기사 요약 1~2문장. 줄임표 없이 경어체로 끝맺음.\n"
             f"Opinion: {policy_perspective} 관점의 의미나 확인 포인트 1~2문장.\n"
             "Source: 원문 링크\n\n"
-            "# 2️⃣ 기사 제목\n"
+            "2️⃣ 기사 제목\n"
             "기사 요약 1~2문장.\n\n"
-            "---\n\n"
             "오늘 한 줄 요약 🎯\n"
-            "전체 흐름을 한 문장으로 요약.\n\n"
-            "---\n\n"
-            f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. "
-            "실제 신청 전 공식 안내를 한 번 더 확인해 주세요."
+            "전체 흐름을 한 문장으로 요약."
         ),
         "articles": article_payload(articles),
     }
@@ -239,7 +234,41 @@ def _fit_summary_for_kakao(summary: str, max_chars: int = KAKAO_MESSAGE_SOFT_LIM
 
 
 def _with_weather(config: Config, summary: str) -> str:
-    return _fit_summary_for_kakao(_prepend_weather_summary(summary, build_weather_summary(config)))
+    summary = _prepend_weather_summary(summary, build_weather_summary(config))
+    return _fit_summary_for_kakao(_normalize_message_format(summary, config.agency_name))
+
+
+def _is_footer_guidance(line: str, agency_name: str) -> bool:
+    compact = re.sub(r"\s+", "", line)
+    return (
+        line.startswith("💡")
+        and (
+            "관련일정과제도" in compact
+            or "실제신청전" in compact
+            or "공식안내" in compact
+            or "검색어를넓히거나" in compact
+        )
+    )
+
+
+def _normalize_message_format(summary: str, agency_name: str) -> str:
+    normalized: list[str] = []
+    previous_blank = False
+    for raw_line in summary.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if stripped == "---":
+            continue
+        if _is_footer_guidance(stripped, agency_name):
+            continue
+        line = re.sub(r"^\s*#+\s+((?:\d+️⃣)|🔟|\d+\.)\s+", r"\1 ", line)
+        line = re.sub(r"^\s*#+\s+(\d+)\s+", r"\1 ", line)
+        blank = not line.strip()
+        if blank and previous_blank:
+            continue
+        normalized.append(line)
+        previous_blank = blank
+    return "\n".join(normalized).strip()
 
 
 def _load_json_object(raw_text: str) -> dict[str, Any]:
@@ -280,8 +309,6 @@ def _render_codex_summary(
     if weather_summary:
         lines.extend([weather_summary, ""])
     lines.extend([
-        "---",
-        "",
         f"오늘의 {agency_name} 뉴스 톡 📡",
     ])
 
@@ -316,11 +343,11 @@ def _render_codex_summary(
             fallback_opinion = (
                 _article_opinion(fallback_article, agency_name)
                 if fallback_article
-                else f"{agency_name} 관련 행정·제도 흐름을 확인할 수 있는 기사예요. 실제 세부 조건은 원문과 공식 안내에서 확인하는 게 좋습니다."
+                else f"{agency_name} 관련 보도의 흐름을 확인할 수 있는 기사예요. 실제 판단은 원문과 공식 발표를 함께 확인하는 게 좋습니다."
             )
             lines.extend(
                 [
-                    f"# {number} {title}",
+                    f"{number} {title}",
                     summary,
                     f"Opinion: {opinion or fallback_opinion}",
                     f"Source: {url or _clean_text(item.get('source'), 80) or '네이버 뉴스'}",
@@ -341,14 +368,8 @@ def _render_codex_summary(
 
     lines.extend(
         [
-            "---",
-            "",
             "오늘 한 줄 요약 🎯",
             one_line,
-            "",
-            "---",
-            "",
-            f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 {agency_name} 공식 안내를 한 번 더 확인해 주세요.",
         ]
     )
     return _fit_summary_for_kakao("\n".join(lines))
@@ -386,6 +407,9 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Use polite conversational Korean. End every sentence clearly with forms such as 합니다, 했습니다, 입니다, 주세요, or 됩니다.",
             "Never use ellipses, Unicode ellipsis, repeated trailing dots, or title-shortening marks.",
             "Do not mention input, JSON, article summary, provided text, or source data.",
+            "Do not use Markdown heading markers such as # before item numbers.",
+            "Do not use horizontal divider lines such as ---.",
+            "Do not add a closing guidance line beginning with 💡.",
             f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
@@ -475,7 +499,7 @@ def _trim_sentence(value: str, limit: int = 180) -> str:
 
 def _article_opinion(article: Article, agency_name: str = "병무청") -> str:
     if agency_name != "병무청":
-        return f"{agency_name} 관련 정책이나 현장 안내는 세부 대상과 일정이 달라질 수 있어요. 기사 내용만으로 단정하지 말고 원문과 {agency_name} 공식 안내를 함께 확인하는 게 좋습니다."
+        return f"{agency_name} 관련 보도는 시장·조직·정책 환경에 따라 해석이 달라질 수 있어요. 기사 내용만으로 단정하지 말고 원문과 공식 발표를 함께 확인하는 게 좋습니다."
     haystack = f"{article.title} {article.summary}".lower()
     if "전문연구요원" in haystack or "산업기능요원" in haystack or "병역특례" in haystack:
         return "병역특례 지정·추천 소식은 기업과 지원자 모두에게 영향을 줄 수 있어요. 제도 요건과 실제 신청 가능 여부는 별도 확인이 필요합니다."
@@ -494,7 +518,7 @@ def _article_opinion(article: Article, agency_name: str = "병무청") -> str:
 
 def _one_line_summary(articles: list[Article], agency_name: str = "병무청") -> str:
     if agency_name != "병무청":
-        return f"{agency_name} 관련 제도와 현장 소식이 네이버 뉴스 기준으로 이어진 하루였습니다."
+        return f"{agency_name} 관련 주요 보도가 네이버 뉴스 기준으로 확인된 하루였습니다."
     titles = " ".join(article.title for article in articles[:5])
     if "경진대회" in titles or "공공데이터" in titles:
         return "공공데이터·AI 활용, 복무 인력 관리, 지방병무청 현장 소식이 함께 포착된 하루였습니다."
@@ -509,27 +533,17 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
     if not articles:
         lines = [
             header,
-            "---",
-            "",
             f"오늘의 {agency_name} 뉴스 톡 📡",
             "확인된 주요 뉴스가 없습니다.",
             "",
-            "---",
-            "",
             "오늘 한 줄 요약 🎯",
             f"오늘은 공유할 만한 {agency_name} 직접 관련 뉴스가 확인되지 않았습니다.",
-            "",
-            "---",
-            "",
-            "💡 필요하면 검색어를 넓히거나 Google News·정책브리핑 RSS 보조 출처를 켜서 다시 확인할 수 있어요.",
         ]
         return "\n".join(lines)
 
     top = articles[:SUMMARY_ITEM_LIMIT]
     lines = [
         header,
-        "---",
-        "",
         f"오늘의 {agency_name} 뉴스 톡 📡",
     ]
 
@@ -538,7 +552,7 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
         summary = _trim_sentence(article.summary or article.title, 150)
         lines.extend(
             [
-                f"# {number} {_clean_title(article.title)}",
+                f"{number} {_clean_title(article.title)}",
                 f"{summary} 🎯",
                 f"Opinion: {_article_opinion(article, agency_name)}",
                 f"Source: {article.url or article.source or '네이버 뉴스'}",
@@ -552,14 +566,8 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
 
     lines.extend(
         [
-            "---",
-            "",
             "오늘 한 줄 요약 🎯",
             _one_line_summary(articles, agency_name),
-            "",
-            "---",
-            "",
-            f"💡 {agency_name} 관련 일정과 제도는 개인별 조건에 따라 달라질 수 있어요. 실제 신청 전 {agency_name} 공식 안내를 한 번 더 확인해 주세요.",
         ]
     )
     return _fit_summary_for_kakao("\n".join(lines))

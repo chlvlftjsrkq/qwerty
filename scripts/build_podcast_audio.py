@@ -293,7 +293,7 @@ def extract_articles(summary: str) -> list[dict[str, str]]:
         if line.startswith("요약 모델 호출 실패:"):
             continue
 
-        heading_match = re.match(r"^#\s*(🔟|[0-9]️⃣|[0-9]+)\s*(.+)$", line)
+        heading_match = re.match(r"^(?:#\s*)?(🔟|[0-9]️⃣|[0-9]+)\s*(.+)$", line)
         if heading_match:
             if current:
                 articles.append(
