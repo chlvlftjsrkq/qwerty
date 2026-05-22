@@ -174,6 +174,14 @@ GENERIC_TOPIC_WORDS = {
     "종결",
 }
 
+TOPIC_ENTITY_ALIASES = {
+    "유승준": ("유승준", "스티브유", "스티브 유", "steveyoo", "steve yoo", "steve유"),
+    "MC몽": ("MC몽", "엠씨몽", "신동현"),
+    "송민호": ("송민호", "mino", "위너 송민호", "위너송민호"),
+    "라비": ("라비", "김원식"),
+    "나플라": ("나플라", "최석배"),
+}
+
 ISSUE_FAMILIES = [
     ("병역논란", ("병역기피", "병역 기피", "병역비리", "병역 비리", "병역법 위반", "고의발치", "발치몽")),
     ("허위진단서", ("허위진단서", "허위 진단서", "정신질환 가장", "4급 판정", "재병역판정검사")),
@@ -458,6 +466,14 @@ def strip_leading_issue_label(title: str) -> str:
     ).strip()
 
 
+def known_topic_entity(text: str) -> str:
+    normalized_text = normalize_topic_token(text)
+    for entity, aliases in TOPIC_ENTITY_ALIASES.items():
+        if any(normalize_topic_token(alias) in normalized_text for alias in aliases):
+            return entity
+    return ""
+
+
 def issue_family(text: str, matched_terms: list[str]) -> str:
     compact = normalize_topic_token(text)
     matched_compact = {normalize_topic_token(term) for term in matched_terms}
@@ -471,6 +487,9 @@ def issue_family(text: str, matched_terms: list[str]) -> str:
 
 def extract_topic_entity(item: NewsItem) -> str:
     text = clean_text(f"{item.title} {item.summary}")
+    known = known_topic_entity(text)
+    if known:
+        return known
     title = re.sub(r"^\[[^\]]+\]\s*", "", item.title).strip()
     token_sources = [strip_leading_issue_label(title), title, text]
     candidates: list[str] = []

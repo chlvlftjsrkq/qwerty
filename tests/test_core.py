@@ -473,6 +473,47 @@ class CoreTests(unittest.TestCase):
             topic_fingerprint(second, classify_heuristic(second)),
         )
 
+    def test_negative_watch_prefers_known_entity_over_title_prefix(self):
+        first = NewsItem(
+            title='딸과 함께 해명 나선 \' 병역기피 \' 유승준 "공무원 해고설은 루머"',
+            url="https://example.com/steve-prefix-a",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T18:15:00+09:00",
+            summary="병역 기피 논란으로 입국이 제한된 가수 스티브 유가 병역 특혜와 공무원 해고설을 해명했다.",
+            query="병무청 병역기피",
+        )
+        second = NewsItem(
+            title='항소심 앞둔 유승준, 공무원 해고· 병역 특혜 논란 해명 "모두 사실무근"',
+            url="https://example.com/steve-prefix-b",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T20:15:00+09:00",
+            summary="가수 유승준이 과거 병역 기피 혐의를 둘러싼 각종 루머를 해명했다.",
+            query="병무청 병역기피",
+        )
+        third = NewsItem(
+            title="법무부, 유승준 ‘입국 금지’ 법적 근거 마련한다",
+            url="https://example.com/steve-prefix-c",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T20:45:00+09:00",
+            summary="병역 기피 논란의 유승준 입국 금지 관련 법적 근거를 마련한다.",
+            query="병무청 병역기피",
+        )
+
+        self.assertEqual("유승준", extract_topic_entity(first))
+        self.assertEqual("유승준", extract_topic_entity(second))
+        self.assertEqual("유승준", extract_topic_entity(third))
+        self.assertEqual(
+            topic_fingerprint(first, classify_heuristic(first)),
+            topic_fingerprint(second, classify_heuristic(second)),
+        )
+        self.assertEqual(
+            topic_fingerprint(first, classify_heuristic(first)),
+            topic_fingerprint(third, classify_heuristic(third)),
+        )
+
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 21, 59, tzinfo=timezone.utc), 8, 22))
