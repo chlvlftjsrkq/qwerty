@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from kakao_mma_news.kakao import split_message
-from kakao_mma_news.news import Article, dedupe_articles, matches_required_terms, strip_html
+from kakao_mma_news.news import (
+    Article,
+    briefing_priority_score,
+    dedupe_articles,
+    matches_required_terms,
+    strip_html,
+)
 from scripts.filter_articles_by_summary_sources import extract_source_urls, filter_articles_by_source_urls
 from kakao_mma_news.summarize import (
     _load_json_object,
@@ -424,6 +430,44 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 21, 59, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 0, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 7, 59, tzinfo=timezone.utc), 8, 22))
+
+    def test_mma_briefing_priority_orders_issue_before_national_before_local(self):
+        config = SimpleNamespace(
+            agency_name="병무청",
+            query_terms=["병무청", "사회복무요원", "병역법 위반"],
+        )
+        issue = Article(
+            title="송민호, 병역법 위반 의혹 재판",
+            url="https://example.com/issue",
+            source="example.com",
+            published_at=datetime(2026, 5, 21, 9, 0, tzinfo=timezone.utc),
+            summary="가수 송민호가 사회복무요원 부실 복무와 무단 결근 의혹을 받고 있다.",
+            origin="naver_news",
+        )
+        national = Article(
+            title="병무청, 병역판정검사 제도 개선",
+            url="https://example.com/national",
+            source="example.com",
+            published_at=datetime(2026, 5, 21, 10, 0, tzinfo=timezone.utc),
+            summary="병무청이 현역병 입영과 병역판정검사 안내를 발표했다.",
+            origin="naver_news",
+        )
+        local = Article(
+            title="서울지방병무청, 청렴 캠페인 개최",
+            url="https://example.com/local",
+            source="example.com",
+            published_at=datetime(2026, 5, 21, 11, 0, tzinfo=timezone.utc),
+            summary="서울지방병무청이 청렴 홍보 행사를 열었다.",
+            origin="naver_news",
+        )
+        self.assertGreater(
+            briefing_priority_score(issue, config),
+            briefing_priority_score(national, config),
+        )
+        self.assertGreater(
+            briefing_priority_score(national, config),
+            briefing_priority_score(local, config),
+        )
 
     def test_negative_watch_rejects_mismatched_naver_snippet(self):
         item = NewsItem(

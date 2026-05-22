@@ -20,6 +20,80 @@ try:
 except ZoneInfoNotFoundError:
     KST = timezone(timedelta(hours=9), "KST")
 
+MMA_BRIEFING_NEGATIVE_TERMS = {
+    "병역법 위반": 120,
+    "병역기피": 120,
+    "병역 기피": 120,
+    "병역비리": 120,
+    "병역 비리": 120,
+    "허위진단서": 100,
+    "허위 진단서": 100,
+    "부실복무": 95,
+    "부실 복무": 95,
+    "무단결근": 95,
+    "무단 결근": 95,
+    "무단이탈": 90,
+    "무단 이탈": 90,
+    "복무이탈": 90,
+    "복무 이탈": 90,
+    "근무태만": 80,
+    "징역": 75,
+    "기소": 70,
+    "검찰": 65,
+    "재판": 65,
+    "공판": 65,
+    "수사": 60,
+    "송치": 60,
+    "논란": 45,
+    "의혹": 45,
+    "특혜": 35,
+    "루머": 25,
+}
+
+MMA_BRIEFING_PUBLIC_TERMS = (
+    "연예인",
+    "가수",
+    "아이돌",
+    "배우",
+    "래퍼",
+    "방송인",
+    "공인",
+    "축구선수",
+    "프로야구",
+    "유튜버",
+)
+
+MMA_BRIEFING_LOCAL_TERMS = (
+    "지방병무청",
+    "병무지청",
+    "서울지방",
+    "부산지방",
+    "경인지방",
+    "인천병무",
+    "대전충남",
+    "충북지방",
+    "광주전남",
+    "대구경북",
+    "전북지방",
+    "경남지방",
+    "제주지방",
+)
+
+MMA_BRIEFING_ROUTINE_TERMS = (
+    "기고",
+    "간담회",
+    "방문",
+    "홍보",
+    "업무협약",
+    "협약",
+    "청렴",
+    "모집",
+    "설명회",
+    "체험",
+    "캠페인",
+    "기념 촬영",
+)
+
 
 @dataclass(frozen=True)
 class Article:
@@ -138,6 +212,43 @@ def relevance_score(article: Article, terms: list[str]) -> int:
     return score
 
 
+def briefing_priority_score(article: Article, config: Config) -> int:
+    if config.agency_name != "병무청":
+        return relevance_score(article, config.query_terms)
+
+    haystack = f"{article.title} {article.summary} {article.content}"
+    score = 0
+    negative_score = 0
+    for term, weight in MMA_BRIEFING_NEGATIVE_TERMS.items():
+        if term in haystack:
+            negative_score += weight
+    score += negative_score
+
+    has_public_context = any(term in haystack for term in MMA_BRIEFING_PUBLIC_TERMS)
+    if negative_score and has_public_context:
+        score += 160
+    elif has_public_context:
+        score += 45
+
+    if "병무청" in haystack:
+        score += 70
+    if "병무청장" in haystack:
+        score += 45
+    if "특별사법경찰" in haystack:
+        score += 55
+    if "사회복무요원" in haystack:
+        score += 35
+    if "병역판정검사" in haystack or "입영" in haystack or "현역병" in haystack:
+        score += 25
+
+    if any(term in haystack for term in MMA_BRIEFING_LOCAL_TERMS):
+        score -= 35 if not negative_score else 10
+    if any(term in haystack for term in MMA_BRIEFING_ROUTINE_TERMS):
+        score -= 25 if not negative_score else 5
+
+    return score
+
+
 def matches_required_terms(article: Article, terms: list[str]) -> bool:
     if not terms:
         return True
@@ -158,7 +269,7 @@ def read_feed(url: str, origin: str, timeout: float) -> list[Article]:
     except ImportError as exc:
         raise RuntimeError("feedparser가 설치되어 있지 않습니다. requirements.txt를 설치하세요.") from exc
 
-    parsed = feedparser.parse(url, request_headers={"User-Agent": "mma-news-digest/0.1"})
+    parsed = feedparser.parse(url, request_headers={"User-Agent": "agency-news-talkbriefing/0.1"})
     if getattr(parsed, "bozo", False) and not getattr(parsed, "entries", []):
         raise RuntimeError(f"RSS 읽기 실패: {getattr(parsed, 'bozo_exception', 'unknown error')}")
 
@@ -264,7 +375,7 @@ def _collect_naver_news_direct(config: Config, target_date: date | None = None) 
     headers = {
         "X-Naver-Client-Id": config.naver_client_id,
         "X-Naver-Client-Secret": config.naver_client_secret,
-        "User-Agent": "mma-news-digest/0.1",
+        "User-Agent": "agency-news-talkbriefing/0.1",
     }
     articles: list[Article] = []
     for term in config.query_terms:
@@ -441,6 +552,7 @@ def _filter_articles(articles: Iterable[Article], config: Config, target_date: d
 
     filtered.sort(
         key=lambda item: (
+            briefing_priority_score(item, config),
             relevance_score(item, config.query_terms),
             item.published_at or datetime.min.replace(tzinfo=timezone.utc),
         ),
@@ -462,7 +574,7 @@ def fetch_article_text(url: str, timeout: float) -> str:
         response = requests.get(
             url,
             timeout=timeout,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; mma-news-digest/0.1)"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; agency-news-talkbriefing/0.1)"},
         )
         response.raise_for_status()
     except Exception:
