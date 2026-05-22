@@ -217,12 +217,17 @@ def briefing_priority_score(article: Article, config: Config) -> int:
         return relevance_score(article, config.query_terms)
 
     haystack = f"{article.title} {article.summary} {article.content}"
+    title_text = article.title
     score = 0
     negative_score = 0
+    title_negative_score = 0
     for term, weight in MMA_BRIEFING_NEGATIVE_TERMS.items():
         if term in haystack:
             negative_score += weight
+        if term in title_text:
+            title_negative_score += weight
     score += negative_score
+    score += title_negative_score
 
     has_public_context = any(term in haystack for term in MMA_BRIEFING_PUBLIC_TERMS)
     if negative_score and has_public_context:
@@ -240,6 +245,8 @@ def briefing_priority_score(article: Article, config: Config) -> int:
         score += 35
     if "병역판정검사" in haystack or "입영" in haystack or "현역병" in haystack:
         score += 25
+    if negative_score and not title_negative_score and not any(term in title_text for term in ("병무청", "병역", "사회복무요원", "공익")):
+        score -= 140
 
     if any(term in haystack for term in MMA_BRIEFING_LOCAL_TERMS):
         score -= 35 if not negative_score else 10

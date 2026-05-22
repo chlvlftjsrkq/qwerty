@@ -331,7 +331,7 @@ def _render_codex_summary(
     for article in articles[:SUMMARY_ITEM_LIMIT]:
         model_item = model_by_url.get(article.url) or model_by_title.get(_clean_title(article.title)) or {}
         title = _clean_title(article.title)
-        summary = _clean_text(model_item.get("summary"), 130) or _trim_sentence(article.summary or article.title, 130)
+        summary = _clean_text(model_item.get("summary"), 130) or _fallback_article_summary(article)
         opinion = _clean_text(model_item.get("opinion"), 100) or _article_opinion(article, agency_name)
         url = article.url or _clean_text(model_item.get("url"), 500)
         if not title or not summary:
@@ -357,6 +357,8 @@ def _render_codex_summary(
         lines.extend(["확인된 주요 뉴스가 없습니다.", ""])
 
     excluded_note = _clean_excluded_note(data.get("excluded_note"))
+    if rendered_items >= min(len(articles), SUMMARY_ITEM_LIMIT):
+        excluded_note = ""
     if "중복" in excluded_note:
         excluded_note = ""
     if excluded_note:
@@ -497,6 +499,15 @@ def _trim_sentence(value: str, limit: int = 180) -> str:
     if len(text) <= limit:
         return text
     return text[:limit].rstrip(" .,")
+
+
+def _fallback_article_summary(article: Article, limit: int = 85) -> str:
+    text = _trim_sentence(article.summary or article.title, limit)
+    if not text:
+        return f"{_clean_title(article.title)} 관련 보도입니다."
+    if re.search(r"(다|요|죠|니다|습니다|했습니다|됩니다)[.!?]?$", text):
+        return text
+    return f"{text} 내용을 다뤘습니다."
 
 
 def _article_opinion(article: Article, agency_name: str = "병무청") -> str:
