@@ -13,6 +13,7 @@ param(
     [int]$ActiveEndHour = 22,
     [string]$StateKey = "main",
     [string]$DryRun = "false",
+    [string]$SendDiagnostic = "false",
     [string]$TriggerSource = "pc-negative-watch-main"
 )
 
@@ -54,6 +55,7 @@ $argsList = @(
     "--field", "active_end_hour=$ActiveEndHour",
     "--field", "state_key=$StateKey",
     "--field", "dry_run=$(Convert-ToWorkflowBool $DryRun)",
+    "--field", "send_diagnostic_report=$(Convert-ToWorkflowBool $SendDiagnostic)",
     "--field", "trigger_source=$TriggerSource"
 )
 
@@ -79,6 +81,7 @@ $logObject = [ordered]@{
     active_end_hour = $ActiveEndHour
     state_key = $StateKey
     dry_run = (Convert-ToWorkflowBool $DryRun)
+    send_diagnostic_report = (Convert-ToWorkflowBool $SendDiagnostic)
     trigger_source = $TriggerSource
     workflow = $Workflow
     repo = $Repo

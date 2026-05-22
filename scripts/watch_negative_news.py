@@ -1492,6 +1492,85 @@ def build_alert_message(
     return "\n".join(lines)
 
 
+def trim_for_report(value: str, limit: int = 82) -> str:
+    text = clean_text(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def build_diagnostic_report(
+    *,
+    room: str,
+    now: datetime,
+    fetched_count: int,
+    recent_count: int,
+    new_count: int,
+    raw_candidate_count: int,
+    source_relevance_reject_count: int,
+    topic_duplicate_matches: list[dict[str, str]],
+    semantic_duplicate_matches: list[dict[str, str]],
+    ai_duplicate_checks: int,
+    recent_alert_record_count: int,
+    alerts: list[tuple[NewsItem, Classification, str]],
+    errors: list[str],
+) -> str:
+    checked_label = f"{now.year}년 {now.month}월 {now.day}일 {now.hour}시 {now.minute:02d}분"
+    lines = [
+        "🧪 부정 이슈 탐지 테스트 리포트",
+        "",
+        f"검색 시각: {checked_label}",
+        f"대상 채팅방: {room}",
+        "",
+        "검색 결과",
+        f"- 전체 수집: {fetched_count}건",
+        f"- 최근 범위 기사: {recent_count}건",
+        f"- 신규 기사: {new_count}건",
+        f"- 부정 이슈 후보: {raw_candidate_count}건",
+        f"- 원문 확인 제외: {source_relevance_reject_count}건",
+        f"- 최근 12시간 발송 이력: {recent_alert_record_count}건",
+        "",
+        "중복 판단",
+    ]
+
+    duplicate_lines: list[str] = []
+    for match in semantic_duplicate_matches[:3]:
+        duplicate_lines.extend(
+            [
+                f"- AI 중복 판단: {trim_for_report(match.get('title', ''))}",
+                f"  근거: {trim_for_report(match.get('reason', '') or '최근 12시간 발송 이력과 같은 이슈로 판단했습니다.', 120)}",
+            ]
+        )
+    for match in topic_duplicate_matches[:3]:
+        duplicate_lines.extend(
+            [
+                f"- 규칙 중복 판단: {trim_for_report(match.get('title', ''))}",
+                f"  근거: {trim_for_report(match.get('reason', ''), 120)}",
+            ]
+        )
+
+    if duplicate_lines:
+        lines.extend(duplicate_lines)
+    elif raw_candidate_count == 0:
+        lines.append("- 판단 대상 없음: 신규 부정 이슈 후보가 없었습니다.")
+    elif alerts:
+        lines.append("- 중복 아님: 최근 12시간 발송 이력과 다른 후보가 있어 알림 대상으로 남겼습니다.")
+    else:
+        lines.append("- 중복 아님: 후보는 있었지만 최종 발송 조건을 통과하지 못했습니다.")
+
+    lines.extend(["", f"AI 중복 비교 실행: {ai_duplicate_checks}회", f"실제 알림 발송: {len(alerts)}건"])
+    if alerts:
+        lines.extend(["", "발송 대상"])
+        for index, (item, classification, _topic_key) in enumerate(alerts[:3], start=1):
+            lines.append(f"{index}. {trim_for_report(item.title)}")
+            lines.append(f"   판단: {trim_for_report(classification.reason, 120)}")
+    if errors:
+        lines.extend(["", "수집 오류"])
+        for error in errors[:3]:
+            lines.append(f"- {trim_for_report(error, 120)}")
+    return "\n".join(lines)
+
+
 def resolve_mcp_command(value: str) -> str:
     if value:
         return value
@@ -1615,6 +1694,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--active-end-hour", type=int, default=int(os.getenv("NEGATIVE_WATCH_ACTIVE_END_HOUR", "22")))
     parser.add_argument("--ignore-active-window", action="store_true", help="Run even outside the configured active hours")
     parser.add_argument("--max-alerts", type=int, default=int(os.getenv("NEGATIVE_WATCH_MAX_ALERTS", "1")))
+    parser.add_argument("--send-diagnostic-report", action="store_true", default=os.getenv("NEGATIVE_WATCH_SEND_DIAGNOSTIC", "").strip().lower() in {"1", "true", "yes", "y", "on"})
     parser.add_argument("--dry-run", action="store_true", help="Do not send KakaoTalk messages or update state")
     parser.add_argument("--verify", action="store_true", help="Verify posted KakaoTalk alert")
     parser.add_argument("--mcp-command", default=os.getenv("KAKAOTALK_MCP_COMMAND", ""))
@@ -1779,12 +1859,25 @@ def main() -> int:
     heuristic_pairs: list[tuple[NewsItem, Classification, str]] = []
     run_topics: set[str] = set()
     topic_duplicate_count = 0
+    topic_duplicate_matches: list[dict[str, str]] = []
     semantic_duplicate_count = 0
     semantic_duplicate_matches: list[dict[str, str]] = []
     ai_duplicate_checks = 0
     for item, classification, topic_key in raw_pairs:
         if topic_key in seen_topics or topic_key in run_topics:
             topic_duplicate_count += 1
+            reason = (
+                "최근 12시간 이내 같은 토픽 키가 이미 발송 이력에 있어 규칙 기반 중복으로 제외했습니다."
+                if topic_key in seen_topics
+                else "이번 검색 실행 안에서 같은 토픽 후보를 이미 처리해 중복으로 제외했습니다."
+            )
+            topic_duplicate_matches.append(
+                {
+                    "title": item.title,
+                    "topic_key": topic_key,
+                    "reason": reason,
+                }
+            )
             continue
         if (
             args.summary_provider.lower() == "codex"
@@ -1872,7 +1965,9 @@ def main() -> int:
                 "fetched_count": len(fetched),
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
+                "raw_candidate_count": len(raw_pairs),
                 "topic_duplicate_count": topic_duplicate_count,
+                "topic_duplicate_matches": topic_duplicate_matches,
                 "semantic_duplicate_count": semantic_duplicate_count,
                 "semantic_duplicate_matches": semantic_duplicate_matches,
                 "source_relevance_reject_count": source_relevance_reject_count,
@@ -1946,6 +2041,26 @@ def main() -> int:
         state["last_checked_at"] = now.isoformat()
         save_state(state_path, state)
 
+        diagnostic_posted = 0
+        if args.send_diagnostic_report:
+            diagnostic_message = build_diagnostic_report(
+                room=args.room,
+                now=now,
+                fetched_count=len(fetched),
+                recent_count=len(items),
+                new_count=len(new_items),
+                raw_candidate_count=len(raw_pairs),
+                source_relevance_reject_count=source_relevance_reject_count,
+                topic_duplicate_matches=topic_duplicate_matches,
+                semantic_duplicate_matches=semantic_duplicate_matches,
+                ai_duplicate_checks=ai_duplicate_checks,
+                recent_alert_record_count=len(recent_alert_records),
+                alerts=alerts,
+                errors=errors,
+            )
+            post_to_kakao(diagnostic_message, room=args.room, mcp_command=args.mcp_command, verify=False)
+            diagnostic_posted = 1
+
         alerts_log = output_dir / f"alerts-{now.strftime('%Y-%m-%d')}.jsonl"
         with alerts_log.open("a", encoding="utf-8") as log_file:
             for item, classification, topic_key in alerts:
@@ -1965,6 +2080,8 @@ def main() -> int:
                     )
                     + "\n"
                 )
+    else:
+        diagnostic_posted = 0
 
     print(
         json.dumps(
@@ -1974,7 +2091,9 @@ def main() -> int:
                 "fetched_count": len(fetched),
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
+                "raw_candidate_count": len(raw_pairs),
                 "topic_duplicate_count": topic_duplicate_count,
+                "topic_duplicate_matches": topic_duplicate_matches,
                 "semantic_duplicate_count": semantic_duplicate_count,
                 "ai_duplicate_checks": ai_duplicate_checks,
                 "seen_topic_count": len(seen_topics),
@@ -1982,6 +2101,7 @@ def main() -> int:
                 "candidate_path": str(candidates_path),
                 "alert_count": len(alerts),
                 "posted": posted,
+                "diagnostic_posted": diagnostic_posted,
                 "generated_alert_images": alert_image_paths,
                 "errors": errors,
             },

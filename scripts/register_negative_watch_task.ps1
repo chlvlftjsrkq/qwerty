@@ -15,6 +15,7 @@ param(
     [int]$ActiveEndHour = 22,
     [string]$StateKey = "main",
     [string]$TriggerSource = "pc-negative-watch-main",
+    [switch]$SendDiagnostic,
     [switch]$DryRun,
     [switch]$StartNow
 )
@@ -39,6 +40,7 @@ if ([string]::IsNullOrWhiteSpace($TargetChatroom)) {
 }
 
 $dryRunValue = if ($DryRun) { "true" } else { "false" }
+$sendDiagnosticValue = if ($SendDiagnostic) { "true" } else { "false" }
 $arguments = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
@@ -57,6 +59,7 @@ $arguments = @(
     "-ActiveEndHour", "$ActiveEndHour",
     "-StateKey", "`"$StateKey`"",
     "-DryRun", "$dryRunValue",
+    "-SendDiagnostic", "$sendDiagnosticValue",
     "-TriggerSource", "`"$TriggerSource`""
 )
 

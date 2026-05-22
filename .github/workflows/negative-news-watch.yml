@@ -50,6 +50,11 @@ on:
         type: boolean
         required: false
         default: false
+      send_diagnostic_report:
+        description: "When true, send a test-room diagnostic report for every search run."
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -101,6 +106,7 @@ jobs:
           ACTIVE_START_HOUR_INPUT: ${{ github.event.inputs.active_start_hour || '8' }}
           ACTIVE_END_HOUR_INPUT: ${{ github.event.inputs.active_end_hour || '22' }}
           DRY_RUN_INPUT: ${{ github.event.inputs.dry_run || 'false' }}
+          SEND_DIAGNOSTIC_INPUT: ${{ github.event.inputs.send_diagnostic_report || 'false' }}
         run: |
           $mcpCommand = Join-Path (Split-Path -Parent $env:PYTHON_EXE) "Scripts\kakaotalk-mcp.exe"
           if (!(Test-Path $mcpCommand)) {
@@ -126,6 +132,9 @@ jobs:
           )
           if ("$env:DRY_RUN_INPUT".Trim().ToLowerInvariant() -eq "true") {
             $argsList += "--dry-run"
+          }
+          if ("$env:SEND_DIAGNOSTIC_INPUT".Trim().ToLowerInvariant() -eq "true") {
+            $argsList += "--send-diagnostic-report"
           }
           & $env:PYTHON_EXE @argsList
 

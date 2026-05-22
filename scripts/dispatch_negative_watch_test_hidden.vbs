@@ -18,6 +18,7 @@ command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
   & " -ActiveEndHour 24" _
   & " -StateKey test" _
   & " -DryRun false" _
+  & " -SendDiagnostic true" _
   & " -TriggerSource pc-negative-watch-test-24h"
 
 shell.CurrentDirectory = root

@@ -30,6 +30,7 @@ from scripts.watch_negative_news import (
     alert_record,
     article_source_supports_issue,
     build_alert_message,
+    build_diagnostic_report,
     classify_heuristic,
     extract_topic_entity,
     has_core_issue_relevance,
@@ -576,6 +577,34 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["article"]["title"], "same issue")
         self.assertEqual(records[0]["topic_key"], topic_fingerprint(item, classification))
+
+    def test_negative_watch_diagnostic_report_includes_duplicate_reason(self):
+        message = build_diagnostic_report(
+            room="test",
+            now=datetime.fromisoformat("2026-05-22T22:15:00+09:00"),
+            fetched_count=10,
+            recent_count=8,
+            new_count=2,
+            raw_candidate_count=1,
+            source_relevance_reject_count=0,
+            topic_duplicate_matches=[],
+            semantic_duplicate_matches=[
+                {
+                    "title": "same issue title",
+                    "topic_key": "topic-new",
+                    "matched_topic_key": "topic-old",
+                    "reason": "최근 발송한 같은 인물의 같은 병역 논란입니다.",
+                }
+            ],
+            ai_duplicate_checks=1,
+            recent_alert_record_count=3,
+            alerts=[],
+            errors=[],
+        )
+
+        self.assertIn("부정 이슈 탐지 테스트 리포트", message)
+        self.assertIn("AI 중복 판단", message)
+        self.assertIn("최근 발송한 같은 인물의 같은 병역 논란입니다.", message)
 
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))
