@@ -153,10 +153,14 @@ GENERIC_TOPIC_WORDS = {
     "병역",
     "병역기피",
     "병역비리",
+    "기피",
+    "비리",
     "병역법",
     "위반",
     "의혹",
     "논란",
+    "루머",
+    "특혜",
     "해명",
     "무죄",
     "재판",
@@ -167,6 +171,7 @@ GENERIC_TOPIC_WORDS = {
     "단독",
     "영상",
     "오늘연예",
+    "종결",
 }
 
 ISSUE_FAMILIES = [
@@ -443,6 +448,16 @@ def normalize_topic_token(value: str) -> str:
     return token
 
 
+def strip_leading_issue_label(title: str) -> str:
+    return re.sub(
+        r"^[\"'“”‘’]\s*"
+        r"(?:병역\s*기피|병역\s*비리|병역법\s*위반|부실\s*복무|무단\s*결근|복무\s*이탈|의혹|논란|해명)"
+        r"\s*[\"'“”‘’]\s*",
+        "",
+        title,
+    ).strip()
+
+
 def issue_family(text: str, matched_terms: list[str]) -> str:
     compact = normalize_topic_token(text)
     matched_compact = {normalize_topic_token(term) for term in matched_terms}
@@ -457,7 +472,7 @@ def issue_family(text: str, matched_terms: list[str]) -> str:
 def extract_topic_entity(item: NewsItem) -> str:
     text = clean_text(f"{item.title} {item.summary}")
     title = re.sub(r"^\[[^\]]+\]\s*", "", item.title).strip()
-    token_sources = [title, text]
+    token_sources = [strip_leading_issue_label(title), title, text]
     candidates: list[str] = []
     for source in token_sources:
         for token in re.findall(r"[A-Za-z]{1,8}[가-힣]{1,8}|[가-힣]{2,5}", source):
@@ -483,7 +498,7 @@ def extract_topic_entity(item: NewsItem) -> str:
         if normalized in normalize_topic_token(title[:40]):
             score += 2
         score += normalize_topic_token(text).count(normalized)
-        return score, -len(token)
+        return score, len(token)
 
     # Prefer distinctive named subjects such as "MC몽" even when another person
     # appears first in a reaction article.

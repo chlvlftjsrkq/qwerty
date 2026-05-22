@@ -22,6 +22,7 @@ from scripts.watch_negative_news import (
     article_source_supports_issue,
     build_alert_message,
     classify_heuristic,
+    extract_topic_entity,
     has_core_issue_relevance,
     in_active_window,
     topic_fingerprint,
@@ -391,6 +392,31 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(
             topic_fingerprint(first, classify_heuristic(first)),
             topic_fingerprint(reaction, classify_heuristic(reaction)),
+        )
+
+    def test_negative_watch_ignores_leading_issue_label_for_topic_entity(self):
+        first = NewsItem(
+            title='유승준, 딸 앞서 병역 루머 해명 "퇴근 후 연예활동 보장?"',
+            url="https://example.com/steve-a",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T08:49:00+09:00",
+            summary="병역 기피 논란으로 입국이 제한된 가수 유승준이 과거 특혜 의혹을 부인했다.",
+            query="병무청 병역기피",
+        )
+        second = NewsItem(
+            title="' 병역 기피 ' 유승준, 오랜 루머에 입 열었다 \"이제 종결\" [MHN:픽]",
+            url="https://example.com/steve-b",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T12:31:00+09:00",
+            summary="유승준은 병무청에 직접 확인했다며 병역 의무와 공익 특혜 의혹을 해명했다.",
+            query="병무청 병역기피",
+        )
+        self.assertEqual("유승준", extract_topic_entity(second))
+        self.assertEqual(
+            topic_fingerprint(first, classify_heuristic(first)),
+            topic_fingerprint(second, classify_heuristic(second)),
         )
 
     def test_negative_watch_active_window(self):
