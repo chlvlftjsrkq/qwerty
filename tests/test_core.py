@@ -25,13 +25,18 @@ from kakao_mma_news.summarize import (
 from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import markdown_to_speech
 from scripts.watch_negative_news import (
+    Classification,
     NewsItem,
+    alert_record,
     article_source_supports_issue,
     build_alert_message,
     classify_heuristic,
     extract_topic_entity,
     has_core_issue_relevance,
     in_active_window,
+    merge_recent_alert_records,
+    prune_sent_alerts,
+    recent_seen_records_from_urls,
     topic_fingerprint,
 )
 
@@ -513,6 +518,64 @@ class CoreTests(unittest.TestCase):
             topic_fingerprint(first, classify_heuristic(first)),
             topic_fingerprint(third, classify_heuristic(third)),
         )
+
+    def test_negative_watch_prunes_and_merges_sent_alert_records(self):
+        now = datetime.fromisoformat("2026-05-22T20:00:00+09:00")
+        recent = {
+            "sent_at": "2026-05-22T19:30:00+09:00",
+            "topic_key": "topic-a",
+            "article": {"url": "https://example.com/a", "title": "recent"},
+        }
+        old = {
+            "sent_at": "2026-05-22T07:30:00+09:00",
+            "topic_key": "topic-old",
+            "article": {"url": "https://example.com/old", "title": "old"},
+        }
+        duplicate_topic = {
+            "sent_at": "2026-05-22T19:00:00+09:00",
+            "topic_key": "topic-a",
+            "article": {"url": "https://example.com/a-copy", "title": "copy"},
+        }
+
+        pruned = prune_sent_alerts([recent, old], now, 12)
+        self.assertEqual([record["topic_key"] for record in pruned], ["topic-a"])
+
+        merged = merge_recent_alert_records([duplicate_topic, recent])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["sent_at"], "2026-05-22T19:30:00+09:00")
+
+    def test_negative_watch_rebuilds_recent_alert_records_from_seen_urls(self):
+        now = datetime.fromisoformat("2026-05-22T20:00:00+09:00")
+        item = NewsItem(
+            title="same issue",
+            url="https://example.com/a",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T19:00:00+09:00",
+            summary="same issue summary",
+            query="query",
+        )
+        classification = Classification(
+            send=True,
+            severity="high",
+            category="issue",
+            summary="summary",
+            reason="reason",
+            score=5,
+            matched_terms=["issue"],
+        )
+
+        records = recent_seen_records_from_urls(
+            [item],
+            {"https://example.com/a": "2026-05-22T19:10:00+09:00"},
+            {"https://example.com/a": classification},
+            now,
+            12,
+        )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["article"]["title"], "same issue")
+        self.assertEqual(records[0]["topic_key"], topic_fingerprint(item, classification))
 
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))

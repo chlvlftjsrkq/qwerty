@@ -256,15 +256,17 @@ def parse_datetime(value: object) -> datetime | None:
 
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"seen_urls": {}, "seen_topics": {}, "last_checked_at": ""}
+        return {"seen_urls": {}, "seen_topics": {}, "sent_alerts": [], "last_checked_at": ""}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return {"seen_urls": {}, "seen_topics": {}, "last_checked_at": ""}
+        return {"seen_urls": {}, "seen_topics": {}, "sent_alerts": [], "last_checked_at": ""}
     if not isinstance(data.get("seen_urls"), dict):
         data["seen_urls"] = {}
     if not isinstance(data.get("seen_topics"), dict):
         data["seen_topics"] = {}
+    if not isinstance(data.get("sent_alerts"), list):
+        data["sent_alerts"] = []
     return data
 
 
@@ -438,6 +440,96 @@ def prune_seen_topics(seen_topics: dict[str, str], now: datetime, ttl_hours: int
         if seen_at is None or seen_at >= cutoff:
             pruned[key] = value
     return pruned
+
+
+def alert_record(
+    item: NewsItem,
+    classification: Classification,
+    topic_key: str,
+    sent_at: datetime,
+    *,
+    related_articles: list[NewsItem] | None = None,
+    message: str = "",
+) -> dict[str, Any]:
+    return {
+        "sent_at": sent_at.isoformat(),
+        "topic_key": topic_key,
+        "article": asdict(item),
+        "related_articles": [asdict(related) for related in related_articles or []],
+        "classification": asdict(classification),
+        "message": message,
+    }
+
+
+def prune_sent_alerts(records: list[Any], now: datetime, ttl_hours: int) -> list[dict[str, Any]]:
+    cutoff = now - timedelta(hours=ttl_hours) if ttl_hours > 0 else None
+    pruned: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        sent_at = parse_iso_datetime(record.get("sent_at"))
+        if cutoff is not None and (sent_at is None or sent_at < cutoff):
+            continue
+        pruned.append(record)
+    return pruned
+
+
+def recent_seen_records_from_urls(
+    items: list[NewsItem],
+    seen_urls: dict[str, str],
+    classifications: dict[str, Classification],
+    now: datetime,
+    ttl_hours: int,
+) -> list[dict[str, Any]]:
+    cutoff = now - timedelta(hours=ttl_hours) if ttl_hours > 0 else None
+    records: list[dict[str, Any]] = []
+    for item in items:
+        key = item_key(item)
+        if key not in seen_urls:
+            continue
+        seen_at = parse_iso_datetime(seen_urls.get(key))
+        if seen_at is None:
+            continue
+        if cutoff is not None and seen_at < cutoff:
+            continue
+        classification = classifications.get(key)
+        if classification is None:
+            classification = classify_heuristic(item)
+            classifications[key] = classification
+        if classification.score <= 0:
+            continue
+        topic_key = topic_fingerprint(item, classification)
+        records.append(alert_record(item, classification, topic_key, seen_at))
+    return records
+
+
+def merge_recent_alert_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in sorted(
+        records,
+        key=lambda item: parse_iso_datetime(item.get("sent_at")) or datetime.min.replace(tzinfo=KST),
+        reverse=True,
+    ):
+        article = record.get("article")
+        article_key = ""
+        if isinstance(article, dict):
+            article_key = str(article.get("url") or article.get("naver_url") or article.get("title") or "")
+        key = str(record.get("topic_key") or article_key)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(record)
+    return merged
+
+
+def sent_at_for_topic(records: list[dict[str, Any]], topic_key: str) -> str:
+    if not topic_key:
+        return ""
+    for record in records:
+        if record.get("topic_key") == topic_key:
+            return str(record.get("sent_at") or "")
+    return ""
 
 
 def in_active_window(now: datetime, start_hour: int, end_hour: int) -> bool:
@@ -764,6 +856,132 @@ def resolve_codex_command(value: str) -> str | None:
     if default_windows.exists():
         return str(default_windows)
     return None
+
+
+def compact_alert_record_for_ai(record: dict[str, Any]) -> dict[str, Any]:
+    article = record.get("article") if isinstance(record.get("article"), dict) else {}
+    classification = record.get("classification") if isinstance(record.get("classification"), dict) else {}
+    related = record.get("related_articles") if isinstance(record.get("related_articles"), list) else []
+    related_titles = []
+    for related_item in related[:5]:
+        if isinstance(related_item, dict):
+            title = clean_text(related_item.get("title"))
+            if title:
+                related_titles.append(title)
+    return {
+        "sent_at": record.get("sent_at", ""),
+        "topic_key": record.get("topic_key", ""),
+        "title": clean_text(article.get("title")),
+        "summary": clean_text(article.get("summary")),
+        "url": article.get("url") or article.get("naver_url") or "",
+        "published_at": article.get("published_at", ""),
+        "category": clean_text(classification.get("category")),
+        "classification_summary": clean_text(classification.get("summary")),
+        "matched_terms": classification.get("matched_terms") if isinstance(classification.get("matched_terms"), list) else [],
+        "message": clean_text(record.get("message"))[:1200],
+        "related_titles": related_titles,
+    }
+
+
+def duplicate_with_codex(
+    item: NewsItem,
+    classification: Classification,
+    recent_records: list[dict[str, Any]],
+    *,
+    codex_command: str,
+    codex_model: str,
+    timeout_seconds: float,
+    output_dir: Path,
+) -> tuple[bool, str, str]:
+    if not recent_records:
+        return False, "", ""
+    resolved = resolve_codex_command(codex_command)
+    if not resolved:
+        return False, "", ""
+
+    payload = {
+        "candidate": {
+            "article": asdict(item),
+            "classification": asdict(classification),
+            "topic_key": topic_fingerprint(item, classification),
+        },
+        "recent_sent_alerts": [compact_alert_record_for_ai(record) for record in recent_records[:20]],
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix="negative-watch-duplicate-input-",
+        suffix=".json",
+        dir=output_dir,
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    ) as input_file:
+        json.dump(payload, input_file, ensure_ascii=False)
+        input_path = Path(input_file.name)
+
+    with tempfile.NamedTemporaryFile(
+        prefix="negative-watch-duplicate-output-",
+        suffix=".json",
+        dir=output_dir,
+        delete=False,
+    ) as output_file:
+        output_path = Path(output_file.name)
+
+    prompt = " ".join(
+        [
+            "Task: Compare a candidate Korean negative-news alert with alerts sent during the last 12 hours.",
+            "Read only this JSON file:",
+            str(input_path.resolve()),
+            "Decide whether the candidate is substantially the same issue as any recent sent alert.",
+            "Treat it as duplicate when it is the same person, organization, legal dispute, allegation, or military-service controversy even if the news source, title wording, or publication time differs.",
+            "Do not mark duplicate merely because both articles mention military service; the concrete issue must overlap.",
+            "Return exactly one valid JSON object, no Markdown.",
+            'Schema: {"duplicate":true,"matched_topic_key":"copy the topic_key of the closest recent alert, or empty string","reason":"one concise Korean sentence"}',
+        ]
+    )
+    command = [
+        resolved,
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        "-o",
+        str(output_path),
+    ]
+    if codex_model:
+        command.extend(["--model", codex_model])
+    command.append(prompt)
+
+    try:
+        result = subprocess.run(
+            command,
+            input="",
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False, "", ""
+        raw = output_path.read_text(encoding="utf-8").strip()
+        data = load_json_object(raw)
+        return (
+            bool(data.get("duplicate")),
+            clean_text(data.get("matched_topic_key")),
+            clean_text(data.get("reason")),
+        )
+    except Exception:
+        return False, "", ""
+    finally:
+        for path in (input_path, output_path):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def refine_with_codex(
@@ -1403,6 +1621,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codex-command", default=os.getenv("CODEX_COMMAND", "codex.cmd"))
     parser.add_argument("--codex-model", default=os.getenv("CODEX_MODEL", ""))
     parser.add_argument("--codex-timeout-seconds", type=float, default=float(os.getenv("CODEX_TIMEOUT_SECONDS", "120")))
+    parser.add_argument("--ai-duplicate-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_DUPLICATE_LIMIT", "8")))
     parser.add_argument("--ai-refine-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_REFINE_LIMIT", "3")))
     parser.add_argument("--summary-provider", default=os.getenv("NEGATIVE_WATCH_SUMMARY_PROVIDER", "codex"))
     parser.add_argument("--naver-client-id", default=os.getenv("NAVER_CLIENT_ID", ""))
@@ -1459,6 +1678,11 @@ def main() -> int:
         now,
         args.topic_ttl_hours,
     )
+    sent_alerts = prune_sent_alerts(
+        state.get("sent_alerts", []),
+        now,
+        args.topic_ttl_hours,
+    )
     classifications: dict[str, Classification] = {}
 
     fetched: list[NewsItem] = []
@@ -1506,6 +1730,17 @@ def main() -> int:
                 continue
             seen_topics.setdefault(topic_fingerprint(item, classification), seen_urls[key])
 
+    recent_alert_records = merge_recent_alert_records(
+        sent_alerts
+        + recent_seen_records_from_urls(
+            items,
+            seen_urls,
+            classifications,
+            now,
+            args.topic_ttl_hours,
+        )
+    )
+
     def classify_cached(item: NewsItem) -> Classification:
         key = item_key(item)
         cached = classifications.get(key)
@@ -1544,10 +1779,41 @@ def main() -> int:
     heuristic_pairs: list[tuple[NewsItem, Classification, str]] = []
     run_topics: set[str] = set()
     topic_duplicate_count = 0
+    semantic_duplicate_count = 0
+    semantic_duplicate_matches: list[dict[str, str]] = []
+    ai_duplicate_checks = 0
     for item, classification, topic_key in raw_pairs:
         if topic_key in seen_topics or topic_key in run_topics:
             topic_duplicate_count += 1
             continue
+        if (
+            args.summary_provider.lower() == "codex"
+            and classification.score >= 5
+            and ai_duplicate_checks < max(0, args.ai_duplicate_limit)
+        ):
+            ai_duplicate_checks += 1
+            is_duplicate, matched_topic_key, duplicate_reason = duplicate_with_codex(
+                item,
+                classification,
+                recent_alert_records,
+                codex_command=args.codex_command,
+                codex_model=args.codex_model,
+                timeout_seconds=args.codex_timeout_seconds,
+                output_dir=output_dir,
+            )
+            if is_duplicate:
+                semantic_duplicate_count += 1
+                matched_sent_at = sent_at_for_topic(recent_alert_records, matched_topic_key)
+                seen_topics.setdefault(topic_key, matched_sent_at or now.isoformat())
+                semantic_duplicate_matches.append(
+                    {
+                        "title": item.title,
+                        "topic_key": topic_key,
+                        "matched_topic_key": matched_topic_key,
+                        "reason": duplicate_reason,
+                    }
+                )
+                continue
         run_topics.add(topic_key)
         heuristic_pairs.append((item, classification, topic_key))
 
@@ -1607,8 +1873,11 @@ def main() -> int:
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
                 "topic_duplicate_count": topic_duplicate_count,
+                "semantic_duplicate_count": semantic_duplicate_count,
+                "semantic_duplicate_matches": semantic_duplicate_matches,
                 "source_relevance_reject_count": source_relevance_reject_count,
                 "seen_topic_count": len(seen_topics),
+                "recent_alert_record_count": len(recent_alert_records),
                 "alert_count": len(alerts),
                 "alerts": [
                     {
@@ -1633,6 +1902,7 @@ def main() -> int:
         static_alert_image = Path(args.alert_image) if args.alert_image else None
         if static_alert_image is not None and not static_alert_image.is_absolute():
             static_alert_image = ROOT_DIR / static_alert_image
+        posted_alert_records: list[dict[str, Any]] = []
         for index, ((item, classification, topic_key), message) in enumerate(zip(alerts, messages), start=1):
             related_items = related_by_topic.get(topic_key, [])
             alert_image = static_alert_image
@@ -1654,6 +1924,16 @@ def main() -> int:
                 )
             post_to_kakao(message, room=args.room, mcp_command=args.mcp_command, verify=args.verify)
             posted += 1
+            posted_alert_records.append(
+                alert_record(
+                    item,
+                    classification,
+                    topic_key,
+                    now,
+                    related_articles=related_items,
+                    message=message,
+                )
+            )
 
         for key in inspected_keys:
             seen_urls[key] = now.isoformat()
@@ -1662,6 +1942,7 @@ def main() -> int:
             seen_topics[topic_key] = now.isoformat()
         state["seen_urls"] = dict(list(seen_urls.items())[-2000:])
         state["seen_topics"] = dict(list(seen_topics.items())[-2000:])
+        state["sent_alerts"] = prune_sent_alerts(sent_alerts + posted_alert_records, now, args.topic_ttl_hours)[-200:]
         state["last_checked_at"] = now.isoformat()
         save_state(state_path, state)
 
@@ -1694,7 +1975,10 @@ def main() -> int:
                 "deduped_recent_count": len(items),
                 "new_count": len(new_items),
                 "topic_duplicate_count": topic_duplicate_count,
+                "semantic_duplicate_count": semantic_duplicate_count,
+                "ai_duplicate_checks": ai_duplicate_checks,
                 "seen_topic_count": len(seen_topics),
+                "recent_alert_record_count": len(recent_alert_records),
                 "candidate_path": str(candidates_path),
                 "alert_count": len(alerts),
                 "posted": posted,
