@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -468,6 +468,41 @@ class CoreTests(unittest.TestCase):
             briefing_priority_score(national, config),
             briefing_priority_score(local, config),
         )
+
+    def test_codex_summary_render_backfills_to_ten_in_article_order(self):
+        articles = [
+            Article(
+                title=f"{idx}번 병무청 관련 기사",
+                url=f"https://example.com/{idx}",
+                source="example.com",
+                published_at=datetime(2026, 5, 22, idx % 24, 0, tzinfo=timezone.utc),
+                summary=f"{idx}번 기사 요약입니다.",
+                origin="naver_news",
+            )
+            for idx in range(1, 13)
+        ]
+        summary = _render_codex_summary(
+            date(2026, 5, 22),
+            {
+                "items": [
+                    {
+                        "title": "2번 병무청 관련 기사",
+                        "summary": "모델이 선택한 2번 요약입니다.",
+                        "opinion": "확인 포인트입니다.",
+                        "url": "https://example.com/2",
+                    }
+                ],
+                "excluded_note": "중복 기사는 제외했습니다.",
+                "one_line": "전체 흐름 요약입니다.",
+            },
+            articles,
+            "병무청",
+        )
+        self.assertIn("1️⃣ 1번 병무청 관련 기사", summary)
+        self.assertIn("2️⃣ 2번 병무청 관련 기사", summary)
+        self.assertIn("🔟 10번 병무청 관련 기사", summary)
+        self.assertNotIn("11번 병무청 관련 기사", summary)
+        self.assertNotIn("중복 기사는 제외했습니다", summary)
 
     def test_negative_watch_rejects_mismatched_naver_snippet(self):
         item = NewsItem(

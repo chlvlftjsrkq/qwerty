@@ -313,52 +313,52 @@ def _render_codex_summary(
     ])
 
     rendered_items = 0
-    seen_topic_keys: set[str] = set()
     raw_items = data.get("items", [])
-    if isinstance(raw_items, list):
-        for item in raw_items[:SUMMARY_ITEM_LIMIT]:
-            if not isinstance(item, dict):
-                continue
-            title = _clean_title(item.get("title"))
-            summary = _clean_text(item.get("summary"), 150)
-            opinion = _clean_text(item.get("opinion"), 110)
-            url = _clean_text(item.get("url"), 500)
-            if not title or not summary:
-                continue
-            topic_key = _article_topic_key(title, summary)
-            if topic_key and topic_key in seen_topic_keys:
-                continue
-            if topic_key:
-                seen_topic_keys.add(topic_key)
+    model_items: list[dict[str, Any]] = [
+        item for item in raw_items if isinstance(item, dict)
+    ] if isinstance(raw_items, list) else []
+    model_by_url = {
+        _clean_text(item.get("url"), 500): item
+        for item in model_items
+        if _clean_text(item.get("url"), 500)
+    }
+    model_by_title = {
+        _clean_title(item.get("title")): item
+        for item in model_items
+        if _clean_title(item.get("title"))
+    }
 
-            rendered_items += 1
-            number = (
-                NUMBER_EMOJI[rendered_items - 1]
-                if rendered_items <= len(NUMBER_EMOJI)
-                else f"{rendered_items}."
-            )
-            fallback_article = (
-                articles[rendered_items - 1] if rendered_items <= len(articles) else None
-            )
-            fallback_opinion = (
-                _article_opinion(fallback_article, agency_name)
-                if fallback_article
-                else f"{agency_name} 관련 보도의 흐름을 확인할 수 있는 기사예요. 실제 판단은 원문과 공식 발표를 함께 확인하는 게 좋습니다."
-            )
-            lines.extend(
-                [
-                    f"{number} {title}",
-                    summary,
-                    f"Opinion: {opinion or fallback_opinion}",
-                    f"Source: {url or _clean_text(item.get('source'), 80) or '네이버 뉴스'}",
-                    "",
-                ]
-            )
+    for article in articles[:SUMMARY_ITEM_LIMIT]:
+        model_item = model_by_url.get(article.url) or model_by_title.get(_clean_title(article.title)) or {}
+        title = _clean_title(article.title)
+        summary = _clean_text(model_item.get("summary"), 130) or _trim_sentence(article.summary or article.title, 130)
+        opinion = _clean_text(model_item.get("opinion"), 100) or _article_opinion(article, agency_name)
+        url = article.url or _clean_text(model_item.get("url"), 500)
+        if not title or not summary:
+            continue
+
+        rendered_items += 1
+        number = (
+            NUMBER_EMOJI[rendered_items - 1]
+            if rendered_items <= len(NUMBER_EMOJI)
+            else f"{rendered_items}."
+        )
+        lines.extend(
+            [
+                f"{number} {title}",
+                summary,
+                f"Opinion: {opinion}",
+                f"Source: {url or article.source or '네이버 뉴스'}",
+                "",
+            ]
+        )
 
     if rendered_items == 0:
         lines.extend(["확인된 주요 뉴스가 없습니다.", ""])
 
     excluded_note = _clean_excluded_note(data.get("excluded_note"))
+    if "중복" in excluded_note:
+        excluded_note = ""
     if excluded_note:
         lines.extend([excluded_note, ""])
 
@@ -414,13 +414,15 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
             f"Exclude or briefly down-rank articles that are weakly related to {agency_name}.",
-            "If several articles cover the same event, keep only one representative item.",
+            "Preserve the input article order in the items array. Do not reorder by your own judgment.",
+            "Include the first 10 usable input articles whenever 10 usable articles exist.",
+            "If several articles cover the same event, still summarize each usable input article unless it is clearly irrelevant.",
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
             "For each item summary, write one short polite spoken Korean sentence under 80 Korean characters.",
             "Do not mention ellipses, title-shortening marks, JSON, or formatting rules in excluded_note.",
             f'Required JSON schema: {{"items":[{{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
-            "items는 가능하면 10개, 최대 10개까지 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
+            "items는 입력 기사 순서 그대로 가능하면 10개, 최대 10개까지 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]
     )
     output_file = tempfile.NamedTemporaryFile(
