@@ -18,6 +18,7 @@ from kakao_mma_news.summarize import (
     _fit_summary_for_kakao,
     _prepend_weather_summary,
     _render_codex_summary,
+    _summary_article_groups,
     codex_article_payload,
     summarize_heuristic,
 )
@@ -227,6 +228,53 @@ class CoreTests(unittest.TestCase):
             _article_topic_key("인도인접 현장", "홍소영 병무청장이 삼도동원훈련장을 방문했습니다."),
             "삼도동원훈련장",
         )
+
+    def test_summary_groups_same_public_figure_issue(self):
+        articles = [
+            Article(
+                f"유승준 병역 루머 해명 보도 {idx}",
+                f"https://example.com/ysj-{idx}",
+                "example.com",
+                datetime(2026, 5, 22, idx, 0, tzinfo=timezone.utc),
+                "유승준이 병역 관련 루머를 해명했습니다.",
+                "naver_news",
+            )
+            for idx in range(1, 5)
+        ] + [
+            Article(
+                "송민호 복무 책임자 병역법 위반 공모 혐의 부인",
+                "https://example.com/mino",
+                "example.com",
+                datetime(2026, 5, 22, 5, 0, tzinfo=timezone.utc),
+                "송민호 사회복무요원 복무 관련 재판 소식입니다.",
+                "naver_news",
+            ),
+            Article(
+                "병무청, 현역병 입영 안내",
+                "https://example.com/mma",
+                "example.com",
+                datetime(2026, 5, 22, 6, 0, tzinfo=timezone.utc),
+                "병무청이 현역병 입영 일정을 안내했습니다.",
+                "naver_news",
+            ),
+        ]
+
+        groups = _summary_article_groups(articles)
+        self.assertEqual(len(groups), 3)
+        self.assertEqual(groups[0]["article"].url, "https://example.com/ysj-1")
+        self.assertEqual(len(groups[0]["related"]), 3)
+
+        summary = _render_codex_summary(
+            date(2026, 5, 22),
+            {"items": [], "excluded_note": "", "one_line": "병역 이슈가 이어졌습니다."},
+            articles,
+            "병무청",
+        )
+        self.assertIn("1️⃣ 유승준 병역 루머 해명 보도 1", summary)
+        self.assertIn("관련 보도: 3건 추가 묶음", summary)
+        self.assertNotIn("유승준 병역 루머 해명 보도 2", summary)
+        self.assertIn("2️⃣ 송민호 복무 책임자 병역법 위반 공모 혐의 부인", summary)
+        self.assertIn("3️⃣ 병무청, 현역병 입영 안내", summary)
 
     def test_weather_summary_inserted_after_header(self):
         summary = _prepend_weather_summary(

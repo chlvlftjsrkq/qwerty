@@ -177,6 +177,68 @@ def _article_topic_key(title: str, summary: str) -> str:
     return ""
 
 
+def _article_group_key(article: Article) -> str:
+    compact = re.sub(r"\s+", "", f"{article.title} {article.summary} {article.content}")
+    issue_terms = (
+        "병역",
+        "병무청",
+        "사회복무요원",
+        "복무",
+        "병역법",
+        "공익",
+        "입영",
+        "현역병",
+    )
+    if not any(term in compact for term in issue_terms):
+        return ""
+
+    entity_aliases = {
+        "유승준": ("유승준", "스티브유", "Steve유", "SteveYoo"),
+        "송민호": ("송민호", "MINO", "위너송민호"),
+        "MC몽": ("MC몽", "엠씨몽", "신동현"),
+        "라비": ("라비", "김원식"),
+        "나플라": ("나플라", "최석배"),
+    }
+    compact_lower = compact.lower()
+    for entity, aliases in entity_aliases.items():
+        if any(alias.lower() in compact_lower for alias in aliases):
+            return f"인물:{entity}"
+
+    topic_key = _article_topic_key(article.title, article.summary)
+    if topic_key:
+        return topic_key
+    return ""
+
+
+def _summary_article_groups(
+    articles: list[Article],
+    limit: int = SUMMARY_ITEM_LIMIT,
+    scan_limit: int = CODEX_INPUT_ARTICLE_LIMIT,
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
+    for article in articles[:scan_limit]:
+        key = _article_group_key(article)
+        if key and key in by_key:
+            by_key[key]["related"].append(article)
+            continue
+        if len(groups) >= limit:
+            continue
+        group = {"article": article, "related": []}
+        groups.append(group)
+        if key:
+            by_key[key] = group
+    return groups
+
+
+def _grouped_article_summary(article: Article, related_count: int) -> str:
+    key = _article_group_key(article)
+    if key.startswith("인물:"):
+        entity = key.split(":", 1)[1]
+        return f"{entity} 관련 병역 이슈 보도 {related_count + 1}건을 대표 기사 중심으로 묶었습니다."
+    return f"같은 이슈를 다룬 관련 보도 {related_count + 1}건을 대표 기사 중심으로 묶었습니다."
+
+
 def _remove_ellipsis(value: str) -> str:
     return normalize_space(re.sub(r"(\.{2,}|…+)", " ", value))
 
@@ -328,10 +390,17 @@ def _render_codex_summary(
         if _clean_title(item.get("title"))
     }
 
-    for article in articles[:SUMMARY_ITEM_LIMIT]:
+    article_groups = _summary_article_groups(articles)
+    for group in article_groups:
+        article = group["article"]
+        related_articles = group["related"]
         model_item = model_by_url.get(article.url) or model_by_title.get(_clean_title(article.title)) or {}
         title = _clean_title(article.title)
-        summary = _clean_text(model_item.get("summary"), 130) or _fallback_article_summary(article)
+        summary = _clean_text(model_item.get("summary"), 130)
+        if not summary and related_articles:
+            summary = _grouped_article_summary(article, len(related_articles))
+        if not summary:
+            summary = _fallback_article_summary(article)
         opinion = _clean_text(model_item.get("opinion"), 100) or _article_opinion(article, agency_name)
         url = article.url or _clean_text(model_item.get("url"), 500)
         if not title or not summary:
@@ -347,6 +416,7 @@ def _render_codex_summary(
             [
                 f"{number} {title}",
                 summary,
+                *([f"관련 보도: {len(related_articles)}건 추가 묶음"] if related_articles else []),
                 f"Opinion: {opinion}",
                 f"Source: {url or article.source or '네이버 뉴스'}",
                 "",
@@ -357,7 +427,7 @@ def _render_codex_summary(
         lines.extend(["확인된 주요 뉴스가 없습니다.", ""])
 
     excluded_note = _clean_excluded_note(data.get("excluded_note"))
-    if rendered_items >= min(len(articles), SUMMARY_ITEM_LIMIT):
+    if rendered_items >= min(len(article_groups), SUMMARY_ITEM_LIMIT):
         excluded_note = ""
     if "중복" in excluded_note:
         excluded_note = ""
@@ -417,8 +487,8 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Do not infer unsupported facts.",
             f"Exclude or briefly down-rank articles that are weakly related to {agency_name}.",
             "Preserve the input article order in the items array. Do not reorder by your own judgment.",
-            "Include the first 10 usable input articles whenever 10 usable articles exist.",
-            "If several articles cover the same event, still summarize each usable input article unless it is clearly irrelevant.",
+            "Include up to 10 usable briefing items.",
+            "When several articles cover the same person or same event, keep the earliest/highest-priority article as the representative and treat the rest as related coverage instead of repeating the same issue.",
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
             "For each item summary, write one short polite spoken Korean sentence under 80 Korean characters.",
@@ -554,27 +624,35 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
         ]
         return "\n".join(lines)
 
-    top = articles[:SUMMARY_ITEM_LIMIT]
+    top = _summary_article_groups(articles)
     lines = [
         header,
         f"오늘의 {agency_name} 뉴스 톡 📡",
     ]
 
-    for idx, article in enumerate(top, start=1):
+    for idx, group in enumerate(top, start=1):
+        article = group["article"]
+        related_articles = group["related"]
         number = NUMBER_EMOJI[idx - 1] if idx <= len(NUMBER_EMOJI) else f"{idx}."
-        summary = _trim_sentence(article.summary or article.title, 150)
+        summary = _grouped_article_summary(article, len(related_articles)) if related_articles else _trim_sentence(article.summary or article.title, 150)
         lines.extend(
             [
                 f"{number} {_clean_title(article.title)}",
                 f"{summary} 🎯",
+                *([f"관련 보도: {len(related_articles)}건 추가 묶음"] if related_articles else []),
                 f"Opinion: {_article_opinion(article, agency_name)}",
                 f"Source: {article.url or article.source or '네이버 뉴스'}",
                 "",
             ]
         )
 
-    if len(articles) > len(top):
-        lines.append(f"그 외 관련 기사 {len(articles) - len(top)}건은 중복·관련도 기준으로 제외했습니다.")
+    related_count = sum(len(group["related"]) for group in top)
+    remaining_count = max(0, len(articles) - len(top) - related_count)
+    if related_count:
+        lines.append(f"같은 이슈를 다룬 관련 보도 {related_count}건은 대표 기사에 묶었습니다.")
+        lines.append("")
+    if remaining_count:
+        lines.append(f"그 외 관련 기사 {remaining_count}건은 관련도 기준으로 제외했습니다.")
         lines.append("")
 
     lines.extend(
