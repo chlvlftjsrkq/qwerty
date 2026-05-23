@@ -24,7 +24,7 @@ on:
       lookback_hours:
         description: "Only inspect news published within this many hours."
         required: false
-        default: "168"
+        default: "24"
       topic_ttl_hours:
         description: "Suppress alerts with the same issue topic for this many hours."
         required: false
@@ -99,7 +99,7 @@ jobs:
           NEGATIVE_WATCH_AI_DUPLICATE_LIMIT: ${{ vars.NEGATIVE_WATCH_AI_DUPLICATE_LIMIT || '30' }}
           NEGATIVE_WATCH_IMAGE_SIZE: ${{ vars.NEGATIVE_WATCH_IMAGE_SIZE || '1024x1024' }}
           MAX_ALERTS_INPUT: ${{ github.event.inputs.max_alerts || '1' }}
-          LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '168' }}
+          LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '24' }}
           TOPIC_TTL_HOURS_INPUT: ${{ github.event.inputs.topic_ttl_hours || '12' }}
           RELATED_HOURS_INPUT: ${{ github.event.inputs.related_hours || '12' }}
           RELATED_LIMIT_INPUT: ${{ github.event.inputs.related_limit || '5' }}

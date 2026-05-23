@@ -10,7 +10,7 @@ command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
   & " -GhExe " & Chr(34) & ghPath & Chr(34) _
   & " -TargetChatroom " & Chr(34) & "test" & Chr(34) _
   & " -MaxAlerts 1" _
-  & " -LookbackHours 168" _
+  & " -LookbackHours 24" _
   & " -TopicTtlHours 12" _
   & " -RelatedHours 12" _
   & " -RelatedLimit 5" _

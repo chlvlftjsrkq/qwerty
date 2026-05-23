@@ -1704,7 +1704,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--queries", default=os.getenv("NEGATIVE_WATCH_QUERIES", ""))
     parser.add_argument("--display", type=int, default=int(os.getenv("NEGATIVE_WATCH_DISPLAY", "50")))
     parser.add_argument("--pages", type=int, default=int(os.getenv("NEGATIVE_WATCH_PAGES", "2")))
-    parser.add_argument("--lookback-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_LOOKBACK_HOURS", "168")))
+    parser.add_argument("--lookback-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_LOOKBACK_HOURS", "24")))
     parser.add_argument("--topic-ttl-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_TOPIC_TTL_HOURS", "12")))
     parser.add_argument("--related-hours", type=int, default=int(os.getenv("NEGATIVE_WATCH_RELATED_HOURS", "12")))
     parser.add_argument("--related-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_RELATED_LIMIT", "5")))

@@ -9,7 +9,7 @@ command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
   & " -Ref " & Chr(34) & "main" & Chr(34) _
   & " -GhExe " & Chr(34) & ghPath & Chr(34) _
   & " -MaxAlerts 1" _
-  & " -LookbackHours 168" _
+  & " -LookbackHours 24" _
   & " -TopicTtlHours 12" _
   & " -RelatedHours 12" _
   & " -RelatedLimit 5" _

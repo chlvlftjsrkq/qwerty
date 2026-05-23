@@ -5,7 +5,7 @@ param(
     [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe",
     [string]$TargetChatroom = "",
     [int]$MaxAlerts = 1,
-    [int]$LookbackHours = 168,
+    [int]$LookbackHours = 24,
     [int]$TopicTtlHours = 12,
     [int]$RelatedHours = 12,
     [int]$RelatedLimit = 5,
