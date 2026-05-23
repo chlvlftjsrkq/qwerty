@@ -618,6 +618,24 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(records[0]["topic_key"], topic_fingerprint(item, classification))
 
     def test_negative_watch_diagnostic_report_includes_duplicate_reason(self):
+        item = NewsItem(
+            title="same issue title",
+            url="https://example.com/a",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-22T19:00:00+09:00",
+            summary="same issue summary",
+            query="query",
+        )
+        classification = Classification(
+            send=True,
+            severity="high",
+            category="issue",
+            summary="summary",
+            reason="reason",
+            score=5,
+            matched_terms=["issue"],
+        )
         message = build_diagnostic_report(
             room="test",
             now=datetime.fromisoformat("2026-05-22T22:15:00+09:00"),
@@ -637,6 +655,15 @@ class CoreTests(unittest.TestCase):
             ],
             ai_duplicate_checks=1,
             recent_alert_record_count=3,
+            recent_alert_records=[
+                alert_record(
+                    item,
+                    classification,
+                    "topic-old",
+                    datetime.fromisoformat("2026-05-22T20:00:00+09:00"),
+                )
+            ],
+            new_items=[item],
             alerts=[],
             errors=[],
         )
@@ -644,6 +671,9 @@ class CoreTests(unittest.TestCase):
         self.assertIn("부정 이슈 탐지 테스트 리포트", message)
         self.assertIn("AI 중복 판단", message)
         self.assertIn("최근 발송한 같은 인물의 같은 병역 논란입니다.", message)
+        self.assertIn("최근 12시간 비교 대상", message)
+        self.assertIn("신규 검색 기사", message)
+        self.assertIn("https://example.com/a", message)
 
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))

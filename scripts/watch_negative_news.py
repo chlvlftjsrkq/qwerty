@@ -1517,6 +1517,43 @@ def trim_for_report(value: str, limit: int = 82) -> str:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
+def report_article_lines(prefix: str, article: dict[str, Any] | NewsItem, *, index: int | None = None) -> list[str]:
+    if isinstance(article, NewsItem):
+        title = article.title
+        summary = article.summary
+        url = article.url or article.naver_url
+    else:
+        title = clean_text(article.get("title"))
+        summary = clean_text(article.get("summary"))
+        url = str(article.get("url") or article.get("naver_url") or "")
+
+    label = f"{prefix} {index}." if index is not None else prefix
+    lines = [f"{label} {trim_for_report(title, 72)}"]
+    if summary:
+        lines.append(f"   요약: {trim_for_report(summary, 90)}")
+    if url:
+        lines.append(f"   링크: {url}")
+    return lines
+
+
+def report_record_lines(prefix: str, record: dict[str, Any], *, index: int | None = None) -> list[str]:
+    article = record.get("article") if isinstance(record.get("article"), dict) else {}
+    lines = report_article_lines(prefix, article, index=index)
+    sent_at = parse_iso_datetime(record.get("sent_at"))
+    if sent_at is not None:
+        lines.insert(1, f"   기준시각: {sent_at.astimezone(KST).strftime('%Y-%m-%d %H:%M')}")
+    return lines
+
+
+def find_record_by_topic(records: list[dict[str, Any]], topic_key: str) -> dict[str, Any] | None:
+    if not topic_key:
+        return None
+    for record in records:
+        if record.get("topic_key") == topic_key:
+            return record
+    return None
+
+
 def build_diagnostic_report(
     *,
     room: str,
@@ -1530,6 +1567,8 @@ def build_diagnostic_report(
     semantic_duplicate_matches: list[dict[str, str]],
     ai_duplicate_checks: int,
     recent_alert_record_count: int,
+    recent_alert_records: list[dict[str, Any]],
+    new_items: list[NewsItem],
     alerts: list[tuple[NewsItem, Classification, str]],
     errors: list[str],
 ) -> str:
@@ -1559,6 +1598,12 @@ def build_diagnostic_report(
                 f"  근거: {trim_for_report(match.get('reason', '') or '최근 12시간 발송 이력과 같은 이슈로 판단했습니다.', 120)}",
             ]
         )
+        matched_title = trim_for_report(match.get("matched_title", ""), 72)
+        matched_url = match.get("matched_url", "")
+        if matched_title:
+            duplicate_lines.append(f"  비교 기사: {matched_title}")
+        if matched_url:
+            duplicate_lines.append(f"  비교 링크: {matched_url}")
     for match in topic_duplicate_matches[:3]:
         duplicate_lines.extend(
             [
@@ -1577,6 +1622,20 @@ def build_diagnostic_report(
         lines.append("- 중복 아님: 후보는 있었지만 최종 발송 조건을 통과하지 못했습니다.")
 
     lines.extend(["", f"AI 중복 비교 실행: {ai_duplicate_checks}회", f"실제 알림 발송: {len(alerts)}건"])
+    lines.extend(["", "최근 12시간 비교 대상"])
+    if recent_alert_records:
+        for index, record in enumerate(recent_alert_records[:5], start=1):
+            lines.extend(report_record_lines("-", record, index=index))
+    else:
+        lines.append("- 최근 12시간 안에 비교할 발송·확인 이력이 없습니다.")
+
+    lines.extend(["", "신규 검색 기사"])
+    if new_items:
+        for index, item in enumerate(new_items[:8], start=1):
+            lines.extend(report_article_lines("-", item, index=index))
+    else:
+        lines.append("- 새로 검색된 기사가 없습니다.")
+
     if alerts:
         lines.extend(["", "발송 대상"])
         for index, (item, classification, _topic_key) in enumerate(alerts[:3], start=1):
@@ -1903,6 +1962,12 @@ def main() -> int:
             )
             if is_duplicate:
                 semantic_duplicate_count += 1
+                matched_record = find_record_by_topic(recent_alert_records, matched_topic_key)
+                matched_article = (
+                    matched_record.get("article")
+                    if matched_record is not None and isinstance(matched_record.get("article"), dict)
+                    else {}
+                )
                 matched_sent_at = sent_at_for_topic(recent_alert_records, matched_topic_key)
                 seen_topics.setdefault(topic_key, matched_sent_at or now.isoformat())
                 semantic_duplicate_matches.append(
@@ -1910,6 +1975,9 @@ def main() -> int:
                         "title": item.title,
                         "topic_key": topic_key,
                         "matched_topic_key": matched_topic_key,
+                        "matched_title": clean_text(matched_article.get("title")),
+                        "matched_summary": clean_text(matched_article.get("summary")),
+                        "matched_url": str(matched_article.get("url") or matched_article.get("naver_url") or ""),
                         "reason": duplicate_reason,
                     }
                 )
@@ -2082,6 +2150,8 @@ def main() -> int:
                 semantic_duplicate_matches=semantic_duplicate_matches,
                 ai_duplicate_checks=ai_duplicate_checks,
                 recent_alert_record_count=len(recent_alert_records),
+                recent_alert_records=recent_alert_records,
+                new_items=new_items,
                 alerts=alerts,
                 errors=errors,
             )
