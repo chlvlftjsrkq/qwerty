@@ -4,6 +4,7 @@ param(
     [string]$Ref = "main",
     [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe",
     [string]$StatePath = "",
+    [string]$TargetStartDate = "",
     [string]$TargetDate = "",
     [string]$Agency = "",
     [int]$AgencyIndex = -1,
@@ -16,7 +17,8 @@ param(
     [string]$TriggerSource = "pc-scheduler-0807",
     [string]$SkipNonBusinessDays = "false",
     [string]$BusinessDate = "",
-    [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+    [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +49,40 @@ function Write-DispatchLog {
     Add-Content -LiteralPath $logPath -Value ($LogObject | ConvertTo-Json -Compress) -Encoding UTF8
 }
 
+function Get-BusinessDayStatus {
+    param(
+        [string]$DateValue,
+        [string]$PythonExe,
+        [string]$BusinessDayScript
+    )
+    $businessStatusPath = Join-Path ([System.IO.Path]::GetTempPath()) ("qwerty-business-day-" + [guid]::NewGuid().ToString() + ".json")
+    try {
+        & $PythonExe $BusinessDayScript --date $DateValue --output $businessStatusPath | Out-Null
+        $businessJson = Get-Content -LiteralPath $businessStatusPath -Raw -Encoding UTF8
+        return $businessJson | ConvertFrom-Json
+    } finally {
+        if (Test-Path -LiteralPath $businessStatusPath) {
+            Remove-Item -LiteralPath $businessStatusPath -Force
+        }
+    }
+}
+
+function Get-PreviousBusinessDate {
+    param(
+        [datetime]$BusinessDate,
+        [string]$PythonExe,
+        [string]$BusinessDayScript
+    )
+    $candidate = $BusinessDate.Date.AddDays(-1)
+    while ($true) {
+        $status = Get-BusinessDayStatus -DateValue $candidate.ToString("yyyy-MM-dd") -PythonExe $PythonExe -BusinessDayScript $BusinessDayScript
+        if ([bool]$status.business_day) {
+            return $candidate
+        }
+        $candidate = $candidate.AddDays(-1)
+    }
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($StatePath)) {
     $StatePath = Join-Path $Root ".scheduler\agency-dispatch-state.json"
@@ -60,26 +96,21 @@ if (Convert-ToBool $SkipNonBusinessDays) {
     if (!(Test-Path -LiteralPath $PythonExe)) {
         throw "Python executable was not found: $PythonExe"
     }
+    $businessDayScript = Join-Path $Root "scripts\is_korean_business_day.py"
+    if (!(Test-Path -LiteralPath $businessDayScript)) {
+        throw "Business day script was not found: $businessDayScript"
+    }
     $businessDateArg = $BusinessDate
     if ([string]::IsNullOrWhiteSpace($businessDateArg)) {
         $businessDateArg = (Get-Date).ToString("yyyy-MM-dd")
     }
-    $businessDayScript = Join-Path $Root "scripts\is_korean_business_day.py"
-    $businessStatusPath = Join-Path ([System.IO.Path]::GetTempPath()) ("qwerty-business-day-" + [guid]::NewGuid().ToString() + ".json")
-    try {
-        & $PythonExe $businessDayScript --date $businessDateArg --output $businessStatusPath | Out-Null
-        $businessJson = Get-Content -LiteralPath $businessStatusPath -Raw -Encoding UTF8
-        $businessStatus = $businessJson | ConvertFrom-Json
-    } finally {
-        if (Test-Path -LiteralPath $businessStatusPath) {
-            Remove-Item -LiteralPath $businessStatusPath -Force
-        }
-    }
+    $businessStatus = Get-BusinessDayStatus -DateValue $businessDateArg -PythonExe $PythonExe -BusinessDayScript $businessDayScript
     if (-not [bool]$businessStatus.business_day) {
         $skipLog = @{
             dispatched_at = (Get-Date).ToString("o")
             agency_index = $AgencyIndex
             agency = $Agency
+            target_start_date = $TargetStartDate
             target_date = $TargetDate
             trigger_source = $TriggerSource
             workflow = $Workflow
@@ -92,6 +123,15 @@ if (Convert-ToBool $SkipNonBusinessDays) {
         Write-DispatchLog -StatePath $StatePath -LogObject $skipLog
         Write-Host "Skipped dispatch: $($businessStatus.date) is $($businessStatus.reason) $($businessStatus.holiday_name)"
         exit 0
+    }
+
+    if ([string]::IsNullOrWhiteSpace($TargetDate) -and [string]::IsNullOrWhiteSpace($TargetStartDate)) {
+        $businessDateObject = [datetime]::ParseExact([string]$businessStatus.date, "yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture)
+        $targetEndObject = $businessDateObject.Date.AddDays(-1)
+        $targetStartObject = Get-PreviousBusinessDate -BusinessDate $businessDateObject -PythonExe $PythonExe -BusinessDayScript $businessDayScript
+        $TargetStartDate = $targetStartObject.ToString("yyyy-MM-dd")
+        $TargetDate = $targetEndObject.ToString("yyyy-MM-dd")
+        Write-Host "Computed combined briefing target range: $TargetStartDate to $TargetDate"
     }
 }
 
@@ -147,6 +187,9 @@ $argsList = @(
     "--field", "include_weather_in_summary=$(Convert-ToWorkflowBool $IncludeWeatherInSummary)",
     "--field", "archive_results=$(Convert-ToWorkflowBool $ArchiveResults)"
 )
+if (![string]::IsNullOrWhiteSpace($TargetStartDate)) {
+    $argsList += @("--field", "target_start_date=$TargetStartDate")
+}
 if (![string]::IsNullOrWhiteSpace($TargetDate)) {
     $argsList += @("--field", "target_date=$TargetDate")
 }
@@ -156,6 +199,10 @@ if (![string]::IsNullOrWhiteSpace($TargetChatroom)) {
 
 Set-Location $Root
 Write-Host "Dispatching $Workflow for $agencyName (#$selectedIndex) in $Repo..."
+if ($DryRun) {
+    Write-Host "Dry run only. GitHub CLI args: $($argsList -join ' ')"
+    exit 0
+}
 & $GhExe @argsList
 if ($LASTEXITCODE -ne 0) {
     throw "gh workflow run failed with exit code $LASTEXITCODE"
@@ -167,6 +214,8 @@ $stateObject = [ordered]@{
     last_agency_index = $selectedIndex
     last_agency = $agencyName
     last_dispatch_at = (Get-Date).ToString("o")
+    last_target_start_date = $TargetStartDate
+    last_target_date = $TargetDate
     trigger_source = $TriggerSource
     workflow = $Workflow
     repo = $Repo
@@ -178,6 +227,7 @@ $logObject = [ordered]@{
     dispatched_at = (Get-Date).ToString("o")
     agency_index = $selectedIndex
     agency = $agencyName
+    target_start_date = $TargetStartDate
     target_date = $TargetDate
     trigger_source = $TriggerSource
     workflow = $Workflow
@@ -185,4 +235,4 @@ $logObject = [ordered]@{
 }
 Add-Content -LiteralPath $logPath -Value ($logObject | ConvertTo-Json -Compress) -Encoding UTF8
 
-Write-Host "Dispatch requested successfully: $agencyName (#$selectedIndex), source=$TriggerSource"
+Write-Host "Dispatch requested successfully: $agencyName (#$selectedIndex), source=$TriggerSource, range=$TargetStartDate to $TargetDate"

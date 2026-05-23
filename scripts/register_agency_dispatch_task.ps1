@@ -5,6 +5,7 @@ param(
     [string]$Workflow = "daily-post-mcp-self-hosted.yml",
     [string]$Ref = "main",
     [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe",
+    [string]$TargetStartDate = "",
     [string]$TargetDate = "",
     [switch]$NoSummary,
     [switch]$NoPodcast,
@@ -49,6 +50,9 @@ $arguments = @(
 )
 if (![string]::IsNullOrWhiteSpace($TargetDate)) {
     $arguments += @("-TargetDate", "`"$TargetDate`"")
+}
+if (![string]::IsNullOrWhiteSpace($TargetStartDate)) {
+    $arguments += @("-TargetStartDate", "`"$TargetStartDate`"")
 }
 if (![string]::IsNullOrWhiteSpace($TargetChatroom)) {
     $arguments += @("-TargetChatroom", "`"$TargetChatroom`"")

@@ -21,6 +21,10 @@ on:
         description: "뉴스 기준일 YYYY-MM-DD. 비워두면 KST 기준 전날입니다."
         required: false
         default: ""
+      target_start_date:
+        description: "여러 날을 합쳐 요약할 때 시작일 YYYY-MM-DD. 비워두면 target_date와 같습니다."
+        required: false
+        default: ""
       send_summary:
         description: "카카오톡에 뉴스 요약 본문을 보냅니다."
         type: boolean
@@ -64,6 +68,7 @@ jobs:
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
       TARGET_DATE_INPUT: ${{ github.event.inputs.target_date }}
+      TARGET_START_DATE_INPUT: ${{ github.event.inputs.target_start_date }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +81,7 @@ jobs:
           TRIGGER_SOURCE_INPUT: ${{ github.event.inputs.trigger_source }}
           INCLUDE_WEATHER_INPUT: ${{ github.event.inputs.include_weather_in_summary }}
           TARGET_DATE_INPUT: ${{ github.event.inputs.target_date }}
+          TARGET_START_DATE_INPUT: ${{ github.event.inputs.target_start_date }}
         run: |
           $ErrorActionPreference = "Stop"
           $schedule = Get-Content -Path "config\agency_schedule.json" -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -155,7 +161,25 @@ jobs:
             $targetDate = $env:TARGET_DATE_INPUT.Trim()
           }
 
-          $episodeId = "$targetDate-$agencySlug"
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_START_DATE_INPUT)) {
+            $targetStartDate = $targetDate
+          } else {
+            $targetStartDate = $env:TARGET_START_DATE_INPUT.Trim()
+          }
+          $targetStartDateObj = [datetime]::ParseExact($targetStartDate, "yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture)
+          $targetDateObj = [datetime]::ParseExact($targetDate, "yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture)
+          if ($targetStartDateObj.Date -gt $targetDateObj.Date) {
+            throw "target_start_date must be earlier than or equal to target_date."
+          }
+          if ($targetStartDate -eq $targetDate) {
+            $dateLabel = $targetDate
+            $episodeDateSlug = $targetDate
+          } else {
+            $dateLabel = "$targetStartDate~$targetDate"
+            $episodeDateSlug = "$targetStartDate-to-$targetDate"
+          }
+
+          $episodeId = "$episodeDateSlug-$agencySlug"
           $queryTerms = if ($selectedQueryTerms.Count -gt 0) { [string]::Join(",", $selectedQueryTerms) } else { $agencyName }
           $requiredTerms = if ($selectedRequiredTerms.Count -gt 0) { [string]::Join(",", $selectedRequiredTerms) } else { $agencyName }
           $includeWeather = if ("$env:INCLUDE_WEATHER_INPUT".Trim().ToLowerInvariant() -eq "false") { "false" } else { "true" }
@@ -165,6 +189,9 @@ jobs:
             "AGENCY_NAME=$agencyName",
             "AGENCY_SLUG=$agencySlug",
             "EPISODE_ID=$episodeId",
+            "DATE_LABEL=$dateLabel",
+            "EPISODE_DATE_SLUG=$episodeDateSlug",
+            "TARGET_START_DATE_RESOLVED=$targetStartDate",
             "TARGET_DATE_RESOLVED=$targetDate",
             "NEWS_QUERY_TERMS=$queryTerms",
             "NEWS_REQUIRED_TERMS=$requiredTerms",
@@ -181,13 +208,14 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "agency=$agencyName" -Encoding UTF8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "agency_index=$selectedIndex" -Encoding UTF8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "episode_id=$episodeId" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "target_start_date=$targetStartDate" -Encoding UTF8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "target_date=$targetDate" -Encoding UTF8
           Add-Content -Path $env:GITHUB_OUTPUT -Value "trigger_source=$triggerSource" -Encoding UTF8
 
           Write-Host "Selected agency: $agencyName"
           Write-Host "Selected agency index: $selectedIndex"
           Write-Host "Trigger source: $triggerSource"
-          Write-Host "Target date: $targetDate"
+          Write-Host "Target date range: $dateLabel"
           Write-Host "Episode id: $episodeId"
           Write-Host "Weather location: $weatherLocation"
 
@@ -221,10 +249,13 @@ jobs:
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}
         run: |
           $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          $articlesPath = Join-Path "runs" "articles-$env:EPISODE_ID.json"
           $argsList = @(
             "-m", "kakao_mma_news",
             "--dry-run",
             "--date", "$env:TARGET_DATE_RESOLVED",
+            "--start-date", "$env:TARGET_START_DATE_RESOLVED",
+            "--articles-output", "$articlesPath",
             "--output", "$summaryPath"
           )
           & $env:PYTHON_EXE @argsList
@@ -232,7 +263,7 @@ jobs:
       - name: Build article image sheet
         shell: powershell
         run: |
-          $articlesPath = Join-Path "runs" "articles-$env:TARGET_DATE_RESOLVED.json"
+          $articlesPath = Join-Path "runs" "articles-$env:EPISODE_ID.json"
           $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
           $selectedArticlesPath = Join-Path "runs" "articles-$env:EPISODE_ID-selected.json"
           $imagePath = Join-Path "runs" "news-image-$env:EPISODE_ID.png"
@@ -243,7 +274,7 @@ jobs:
             throw "No summary Markdown file found: $summaryPath"
           }
           & $env:PYTHON_EXE scripts/filter_articles_by_summary_sources.py --articles "$articlesPath" --summary "$summaryPath" --output "$selectedArticlesPath"
-          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$selectedArticlesPath" --output "$imagePath" --date "$env:TARGET_DATE_RESOLVED" --agency "$env:AGENCY_NAME" --limit 10
+          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$selectedArticlesPath" --output "$imagePath" --date "$env:DATE_LABEL" --agency "$env:AGENCY_NAME" --limit 10
 
       - name: Build podcast audio
         shell: powershell
@@ -260,7 +291,7 @@ jobs:
           if (!(Test-Path $summaryPath)) {
             throw "No summary Markdown file found: $summaryPath"
           }
-          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date "$env:TARGET_DATE_RESOLVED" --episode-id "$env:EPISODE_ID" --summary "$summaryPath" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES"
+          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date "$env:DATE_LABEL" --episode-id "$env:EPISODE_ID" --summary "$summaryPath" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES"
           if ([string]::IsNullOrWhiteSpace($env:PODCAST_LISTEN_URL_TEMPLATE)) {
             $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$env:EPISODE_ID"
           } else {
@@ -268,8 +299,16 @@ jobs:
           }
           $messagePath = Join-Path "runs" "podcast-message-$env:EPISODE_ID.txt"
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-          $targetDate = [datetime]::ParseExact($env:TARGET_DATE_RESOLVED, "yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture)
-          $dateLabel = "$($targetDate.Year)$([char]0xB144) $($targetDate.Month)$([char]0xC6D4) $($targetDate.Day)$([char]0xC77C)"
+          function Format-KoreanDateLabel {
+            param([string]$Value)
+            $parsed = [datetime]::ParseExact($Value, "yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture)
+            return "$($parsed.Year)$([char]0xB144) $($parsed.Month)$([char]0xC6D4) $($parsed.Day)$([char]0xC77C)"
+          }
+          if ($env:TARGET_START_DATE_RESOLVED -eq $env:TARGET_DATE_RESOLVED) {
+            $dateLabel = Format-KoreanDateLabel $env:TARGET_DATE_RESOLVED
+          } else {
+            $dateLabel = "$(Format-KoreanDateLabel $env:TARGET_START_DATE_RESOLVED)부터 $(Format-KoreanDateLabel $env:TARGET_DATE_RESOLVED)까지"
+          }
           $labelSuffix = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("64m07IqkIEFJIOydjOyEseyalOyVvSDrk6PquLA="))
           $label = [char]::ConvertFromUtf32(0x1F3A7) + $dateLabel + " " + $env:AGENCY_NAME + " " + $labelSuffix
           [System.IO.File]::WriteAllText($messagePath, "$label`n$listenUrl", $utf8NoBom)
@@ -411,7 +450,7 @@ jobs:
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Trigger source: $env:TRIGGER_SOURCE" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Agency: $env:AGENCY_NAME" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Agency index: $env:AGENCY_INDEX" -Encoding UTF8
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target date: $env:TARGET_DATE_RESOLVED" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target date range: $env:DATE_LABEL" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Episode id: $env:EPISODE_ID" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Weather location: $env:WEATHER_LOCATION" -Encoding UTF8
 

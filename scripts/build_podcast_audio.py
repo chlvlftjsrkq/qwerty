@@ -71,7 +71,7 @@ EMOJI_PATTERN = re.compile(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build a podcast MP3 from a daily summary Markdown file.")
+    parser = argparse.ArgumentParser(description="Build a podcast MP3 from an agency news briefing Markdown file.")
     parser.add_argument("--date", required=True, help="Episode date in YYYY-MM-DD.")
     parser.add_argument(
         "--episode-id",
@@ -125,6 +125,12 @@ def clean_for_speech(line: str) -> str:
 
 
 def format_spoken_date(value: str) -> str:
+    for separator in ("~", "-to-"):
+        if separator in value:
+            start, end = value.split(separator, 1)
+            start_spoken = format_spoken_date(start.strip())
+            end_spoken = format_spoken_date(end.strip())
+            return f"{start_spoken}부터 {end_spoken}까지"
     try:
         parsed = datetime.strptime(value, "%Y-%m-%d")
     except ValueError:

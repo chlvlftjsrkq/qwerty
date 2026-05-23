@@ -536,10 +536,24 @@ def collect_naver_news(config: Config, target_date: date | None = None) -> list[
     return _collect_naver_news_proxy(config, target_date)
 
 
-def _filter_articles(articles: Iterable[Article], config: Config, target_date: date) -> list[Article]:
+def _date_range(start_date: date, target_date: date) -> Iterable[date]:
+    current = start_date
+    while current <= target_date:
+        yield current
+        current += timedelta(days=1)
+
+
+def _filter_articles(
+    articles: Iterable[Article],
+    config: Config,
+    target_date: date,
+    start_date: date | None = None,
+) -> list[Article]:
+    effective_start = start_date or target_date
     filtered: list[Article] = []
     for article in dedupe_articles(articles):
-        if article.published_date_kst != target_date:
+        published_date = article.published_date_kst
+        if not published_date or published_date < effective_start or published_date > target_date:
             continue
         if not matches_required_terms(article, config.required_terms):
             continue
@@ -606,13 +620,17 @@ def fetch_article_text(url: str, timeout: float) -> str:
     return normalize_space(f"{meta_text} {joined}")[:4000]
 
 
-def collect_articles(config: Config, target_date: date) -> list[Article]:
+def collect_articles(config: Config, target_date: date, start_date: date | None = None) -> list[Article]:
+    effective_start = start_date or target_date
+    if effective_start > target_date:
+        raise ValueError("start_date must be earlier than or equal to target_date")
+
     articles = []
     errors: list[str] = []
 
     if config.naver_news_enabled:
         try:
-            articles.extend(collect_naver_news(config, target_date))
+            articles.extend(collect_naver_news(config, effective_start))
         except Exception as exc:
             errors.append(f"collect_naver_news: {exc}")
 
@@ -622,11 +640,12 @@ def collect_articles(config: Config, target_date: date) -> list[Article]:
         except Exception as exc:
             errors.append(f"{collector.__name__}: {exc}")
 
-    filtered = _filter_articles(articles, config, target_date)
+    filtered = _filter_articles(articles, config, target_date, start_date=effective_start)
     if not filtered and config.naver_news_enabled:
         try:
-            articles.extend(_collect_naver_news_web_date_filter(config, target_date))
-            filtered = _filter_articles(articles, config, target_date)
+            for fallback_date in _date_range(effective_start, target_date):
+                articles.extend(_collect_naver_news_web_date_filter(config, fallback_date))
+            filtered = _filter_articles(articles, config, target_date, start_date=effective_start)
         except Exception as exc:
             errors.append(f"collect_naver_news_web_date_filter: {exc}")
 

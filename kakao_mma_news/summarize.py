@@ -19,6 +19,16 @@ SUMMARY_ITEM_LIMIT = 10
 KAKAO_MESSAGE_SOFT_LIMIT = 2900
 
 
+def summary_date_label(target_date: date, start_date: date | None = None) -> str:
+    if start_date and start_date != target_date:
+        return f"{start_date.isoformat()}~{target_date.isoformat()}"
+    return target_date.isoformat()
+
+
+def summary_file_date_label(target_date: date, start_date: date | None = None) -> str:
+    return summary_date_label(target_date, start_date).replace("~", "-to-")
+
+
 def article_payload(articles: list[Article]) -> list[dict[str, str]]:
     payload = []
     for idx, article in enumerate(articles, start=1):
@@ -63,7 +73,12 @@ def codex_article_payload(articles: list[Article], limit: int = CODEX_INPUT_ARTI
     return payload
 
 
-def summarize_with_openai(config: Config, target_date: date, articles: list[Article]) -> str:
+def summarize_with_openai(
+    config: Config,
+    target_date: date,
+    articles: list[Article],
+    start_date: date | None = None,
+) -> str:
     if not config.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY가 없습니다.")
     try:
@@ -80,10 +95,14 @@ def summarize_with_openai(config: Config, target_date: date, articles: list[Arti
         "문장은 간결한 한국어로 작성한다. 광고성 표현과 과장은 금지한다. "
         f"Opinion은 기사 사실을 넘어 단정하지 말고, {policy_perspective} 관점의 확인 포인트로만 쓴다."
     )
+    date_label = summary_date_label(target_date, start_date)
     user_prompt = {
         "target_date": target_date.isoformat(),
+        "target_start_date": (start_date or target_date).isoformat(),
+        "target_end_date": target_date.isoformat(),
+        "date_label": date_label,
         "format": (
-            f"🪖 YYYY-MM-DD {agency_name} 뉴스 브리핑\n"
+            f"🪖 {date_label} {agency_name} 뉴스 브리핑\n"
             f"오늘의 {agency_name} 뉴스 톡 📡\n"
             "1️⃣ 기사 제목\n"
             "기사 요약 1~2문장. 줄임표 없이 경어체로 끝맺음.\n"
@@ -411,10 +430,11 @@ def _render_codex_summary(
     articles: list[Article],
     agency_name: str,
     weather_summary: str = "",
+    start_date: date | None = None,
 ) -> str:
     policy_perspective = "병무행정" if agency_name == "병무청" else f"{agency_name} 정책"
     lines = [
-        f"🪖 {target_date.isoformat()} {agency_name} 뉴스 브리핑",
+        f"🪖 {summary_date_label(target_date, start_date)} {agency_name} 뉴스 브리핑",
     ]
     if weather_summary:
         lines.extend([weather_summary, ""])
@@ -559,19 +579,30 @@ def _render_codex_summary(
     return _fit_summary_for_kakao("\n".join(lines))
 
 
-def summarize_with_codex(config: Config, target_date: date, articles: list[Article]) -> str:
+def summarize_with_codex(
+    config: Config,
+    target_date: date,
+    articles: list[Article],
+    start_date: date | None = None,
+) -> str:
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     agency_name = config.agency_name
     policy_perspective = "병무행정" if agency_name == "병무청" else f"{agency_name} 정책"
+    effective_start = start_date or target_date
+    date_label = summary_date_label(target_date, effective_start)
+    file_label = summary_file_date_label(target_date, effective_start)
     payload = {
         "target_date": target_date.isoformat(),
+        "target_start_date": effective_start.isoformat(),
+        "target_end_date": target_date.isoformat(),
+        "date_label": date_label,
         "agency_name": agency_name,
         "total_articles": len(articles),
         "articles": codex_article_payload(articles),
     }
     input_file = tempfile.NamedTemporaryFile(
-        prefix=f"codex-input-{target_date.isoformat()}-",
+        prefix=f"codex-input-{file_label}-",
         suffix=".json",
         dir=output_dir,
         mode="w",
@@ -595,6 +626,7 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Do not use horizontal divider lines such as ---.",
             "Do not add a closing guidance line beginning with 💡.",
             f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
+            f"The briefing date label is {date_label}; summarize all articles within target_start_date through target_end_date as one combined briefing.",
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
             f"Exclude articles that are weakly related to {agency_name}.",
@@ -615,7 +647,7 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
         ]
     )
     output_file = tempfile.NamedTemporaryFile(
-        prefix=f"codex-summary-{target_date.isoformat()}-",
+        prefix=f"codex-summary-{file_label}-",
         suffix=".md",
         dir=output_dir,
         delete=False,
@@ -666,10 +698,10 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
         try:
             summary_data = _load_json_object(raw_summary)
         except Exception as exc:
-            debug_path = output_dir / f"codex-raw-{target_date.isoformat()}.txt"
+            debug_path = output_dir / f"codex-raw-{file_label}.txt"
             debug_path.write_text(raw_summary, encoding="utf-8")
             raise RuntimeError(f"Codex CLI JSON 파싱 실패(raw: {debug_path}): {exc}") from exc
-        return _render_codex_summary(target_date, summary_data, articles, agency_name)
+        return _render_codex_summary(target_date, summary_data, articles, agency_name, start_date=effective_start)
     finally:
         try:
             output_path.unlink()
@@ -727,9 +759,14 @@ def _one_line_summary(articles: list[Article], agency_name: str = "병무청") -
     return "병무청 관련 제도·행사·현장 안내가 네이버 뉴스 기준으로 이어진 하루였습니다."
 
 
-def summarize_heuristic(config: Config, target_date: date, articles: list[Article]) -> str:
+def summarize_heuristic(
+    config: Config,
+    target_date: date,
+    articles: list[Article],
+    start_date: date | None = None,
+) -> str:
     agency_name = config.agency_name
-    header = f"🪖 {target_date.isoformat()} {agency_name} 뉴스 브리핑"
+    header = f"🪖 {summary_date_label(target_date, start_date)} {agency_name} 뉴스 브리핑"
     if not articles:
         lines = [
             header,
@@ -781,24 +818,29 @@ def summarize_heuristic(config: Config, target_date: date, articles: list[Articl
     return _fit_summary_for_kakao("\n".join(lines))
 
 
-def build_summary(config: Config, target_date: date, articles: list[Article]) -> str:
+def build_summary(
+    config: Config,
+    target_date: date,
+    articles: list[Article],
+    start_date: date | None = None,
+) -> str:
     provider = config.summary_provider
     if provider == "codex":
         try:
-            return _with_weather(config, summarize_with_codex(config, target_date, articles))
+            return _with_weather(config, summarize_with_codex(config, target_date, articles, start_date=start_date))
         except Exception as exc:
-            fallback = summarize_heuristic(config, target_date, articles)
+            fallback = summarize_heuristic(config, target_date, articles, start_date=start_date)
             return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
     if provider == "openai":
-        return _with_weather(config, summarize_with_openai(config, target_date, articles))
+        return _with_weather(config, summarize_with_openai(config, target_date, articles, start_date=start_date))
     if provider in {"heuristic", "none", "fallback"}:
-        return _with_weather(config, summarize_heuristic(config, target_date, articles))
+        return _with_weather(config, summarize_heuristic(config, target_date, articles, start_date=start_date))
     if provider not in {"auto", ""}:
         raise RuntimeError(f"지원하지 않는 SUMMARY_PROVIDER입니다: {provider}")
     if config.openai_api_key:
         try:
-            return _with_weather(config, summarize_with_openai(config, target_date, articles))
+            return _with_weather(config, summarize_with_openai(config, target_date, articles, start_date=start_date))
         except Exception as exc:
-            fallback = summarize_heuristic(config, target_date, articles)
+            fallback = summarize_heuristic(config, target_date, articles, start_date=start_date)
             return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
-    return _with_weather(config, summarize_heuristic(config, target_date, articles))
+    return _with_weather(config, summarize_heuristic(config, target_date, articles, start_date=start_date))

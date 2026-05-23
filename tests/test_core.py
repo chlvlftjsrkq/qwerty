@@ -7,6 +7,7 @@ from unittest.mock import patch
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import (
     Article,
+    _filter_articles,
     briefing_priority_score,
     dedupe_articles,
     matches_required_terms,
@@ -21,10 +22,12 @@ from kakao_mma_news.summarize import (
     _render_codex_summary,
     _summary_article_groups,
     codex_article_payload,
+    summary_date_label,
     summarize_heuristic,
 )
 from kakao_mma_news.weather import build_weather_summary
-from scripts.build_podcast_audio import markdown_to_speech
+from scripts.build_podcast_audio import format_spoken_date, markdown_to_speech
+from scripts.is_korean_business_day import business_day_status
 from scripts.watch_negative_news import (
     Classification,
     NewsItem,
@@ -95,6 +98,40 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(matches_required_terms(article, ["병무청"]))
         self.assertFalse(matches_required_terms(article, ["예비군"]))
 
+    def test_filter_articles_accepts_target_date_range(self):
+        config = SimpleNamespace(
+            required_terms=["병무청"],
+            query_terms=["병무청"],
+            fetch_article_text=False,
+            summary_provider="codex",
+        )
+        articles = [
+            Article(
+                f"병무청 범위 기사 {day}",
+                f"https://example.com/{day}",
+                "example.com",
+                datetime(2026, 5, day, 3, 0, tzinfo=timezone.utc),
+                "병무청 관련 기사입니다.",
+                "test",
+            )
+            for day in (21, 22, 23, 24)
+        ]
+
+        filtered = _filter_articles(articles, config, date(2026, 5, 24), start_date=date(2026, 5, 22))
+
+        self.assertEqual([article.published_date_kst for article in filtered], [date(2026, 5, 24), date(2026, 5, 23), date(2026, 5, 22)])
+
+    def test_range_date_labels_for_briefing_and_podcast(self):
+        self.assertEqual(summary_date_label(date(2026, 5, 25), date(2026, 5, 22)), "2026-05-22~2026-05-25")
+        spoken = format_spoken_date("2026-05-22~2026-05-25")
+        self.assertIn("2026 년 5 월 22 일부터", spoken)
+        self.assertIn("2026 년 5 월 25 일까지", spoken)
+
+    def test_korean_business_day_guard(self):
+        self.assertFalse(business_day_status(date(2026, 5, 23))["business_day"])
+        self.assertFalse(business_day_status(date(2026, 5, 25))["business_day"])
+        self.assertTrue(business_day_status(date(2026, 5, 26))["business_day"])
+
     def test_markdown_summary_format(self):
         article = Article(
             "서울지방병무청 행사",
@@ -107,7 +144,8 @@ class CoreTests(unittest.TestCase):
         config = SimpleNamespace(agency_name="병무청")
         summary = summarize_heuristic(config, article.published_date_kst, [article])
         self.assertIn("오늘의 병무청 뉴스 톡", summary)
-        self.assertIn("# 1️⃣ 서울지방병무청 행사", summary)
+        self.assertIn("1️⃣ 서울지방병무청 행사", summary)
+        self.assertNotIn("# 1️⃣", summary)
         self.assertIn("Opinion:", summary)
         self.assertIn("오늘 한 줄 요약", summary)
         self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
@@ -764,7 +802,7 @@ class CoreTests(unittest.TestCase):
             related_hours=12,
         )
         self.assertIn("핵심 내용", message)
-        self.assertIn("대표 기사에서는", message)
+        self.assertIn("MC몽은 라이브 방송에서 병역 비리 의혹을 부인했다.", message)
         self.assertNotIn("example.com에서", message)
 
 
