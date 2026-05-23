@@ -13,7 +13,10 @@ param(
     [string]$IncludeWeatherInSummary = "true",
     [string]$ArchiveResults = "true",
     [string]$TargetChatroom = "",
-    [string]$TriggerSource = "pc-scheduler-0807"
+    [string]$TriggerSource = "pc-scheduler-0807",
+    [string]$SkipNonBusinessDays = "false",
+    [string]$BusinessDate = "",
+    [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +30,23 @@ function Convert-ToWorkflowBool {
     return "false"
 }
 
+function Convert-ToBool {
+    param([string]$Value)
+    $normalized = "$Value".Trim().ToLowerInvariant()
+    return $normalized -in @("1", "true", "yes", "y", "on")
+}
+
+function Write-DispatchLog {
+    param(
+        [string]$StatePath,
+        [hashtable]$LogObject
+    )
+    $stateDir = Split-Path -Parent $StatePath
+    New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    $logPath = Join-Path $stateDir "agency-dispatch-log.jsonl"
+    Add-Content -LiteralPath $logPath -Value ($LogObject | ConvertTo-Json -Compress) -Encoding UTF8
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($StatePath)) {
     $StatePath = Join-Path $Root ".scheduler\agency-dispatch-state.json"
@@ -34,6 +54,45 @@ if ([string]::IsNullOrWhiteSpace($StatePath)) {
 
 if (!(Test-Path -LiteralPath $GhExe)) {
     throw "GitHub CLI was not found: $GhExe"
+}
+
+if (Convert-ToBool $SkipNonBusinessDays) {
+    if (!(Test-Path -LiteralPath $PythonExe)) {
+        throw "Python executable was not found: $PythonExe"
+    }
+    $businessDateArg = $BusinessDate
+    if ([string]::IsNullOrWhiteSpace($businessDateArg)) {
+        $businessDateArg = (Get-Date).ToString("yyyy-MM-dd")
+    }
+    $businessDayScript = Join-Path $Root "scripts\is_korean_business_day.py"
+    $businessStatusPath = Join-Path ([System.IO.Path]::GetTempPath()) ("qwerty-business-day-" + [guid]::NewGuid().ToString() + ".json")
+    try {
+        & $PythonExe $businessDayScript --date $businessDateArg --output $businessStatusPath | Out-Null
+        $businessJson = Get-Content -LiteralPath $businessStatusPath -Raw -Encoding UTF8
+        $businessStatus = $businessJson | ConvertFrom-Json
+    } finally {
+        if (Test-Path -LiteralPath $businessStatusPath) {
+            Remove-Item -LiteralPath $businessStatusPath -Force
+        }
+    }
+    if (-not [bool]$businessStatus.business_day) {
+        $skipLog = @{
+            dispatched_at = (Get-Date).ToString("o")
+            agency_index = $AgencyIndex
+            agency = $Agency
+            target_date = $TargetDate
+            trigger_source = $TriggerSource
+            workflow = $Workflow
+            repo = $Repo
+            skipped = $true
+            skip_reason = [string]$businessStatus.reason
+            holiday_name = [string]$businessStatus.holiday_name
+            business_date = [string]$businessStatus.date
+        }
+        Write-DispatchLog -StatePath $StatePath -LogObject $skipLog
+        Write-Host "Skipped dispatch: $($businessStatus.date) is $($businessStatus.reason) $($businessStatus.holiday_name)"
+        exit 0
+    }
 }
 
 $schedulePath = Join-Path $Root "config\agency_schedule.json"

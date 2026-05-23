@@ -12,6 +12,7 @@ param(
     [switch]$NoArchive,
     [switch]$NoWeatherInSummary,
     [string]$TargetChatroom = "",
+    [switch]$SkipNonBusinessDays,
     [switch]$StartNow
 )
 
@@ -51,6 +52,9 @@ if (![string]::IsNullOrWhiteSpace($TargetDate)) {
 }
 if (![string]::IsNullOrWhiteSpace($TargetChatroom)) {
     $arguments += @("-TargetChatroom", "`"$TargetChatroom`"")
+}
+if ($SkipNonBusinessDays) {
+    $arguments += @("-SkipNonBusinessDays", "true")
 }
 
 $action = New-ScheduledTaskAction `
