@@ -600,7 +600,8 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             f"Exclude articles that are weakly related to {agency_name}.",
             "Review all input articles and select the most important briefing items yourself. Do not simply copy the first articles.",
             "Return the selected items in your own importance order.",
-            "Include up to 10 usable briefing items.",
+            "Return exactly 10 briefing items when there are at least 10 distinct relevant topics or article groups.",
+            "If fewer than 10 distinct relevant topics exist, return all relevant topics. Do not stop at 5 items when additional direct policy, official activity, recruitment, benefits, military-service system, or local office articles are present.",
             "For 병무청 briefings, balance the final selection: major public or legal military-service issues, direct 병무청 policy or official activity, and meaningful 지방병무청/local office news should all be considered when present.",
             "Do not let many articles about one celebrity or one event fill the whole briefing. Pick one representative item for the same person or event and set related_count to the number of additional related articles.",
             "When several articles cover the same person or same event, keep the strongest representative article and treat the rest as related coverage instead of repeating the same issue.",
@@ -610,7 +611,7 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             "Do not mention ellipses, title-shortening marks, JSON, or formatting rules in excluded_note.",
             "For each item, include the selected input article no whenever possible, and include related_count when you grouped duplicate coverage.",
             f'Required JSON schema: {{"items":[{{"no":"입력 번호","title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL","related_count":0}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
-            "items는 당신이 판단한 중요도 순서로 최대 10개까지 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
+            "items는 당신이 판단한 중요도 순서로 넣되, 관련 기사가 충분하면 10개를 채우고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]
     )
     output_file = tempfile.NamedTemporaryFile(
