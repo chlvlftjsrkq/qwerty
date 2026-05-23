@@ -1995,6 +1995,8 @@ def main() -> int:
                 "topic_duplicate_matches": topic_duplicate_matches,
                 "semantic_duplicate_count": semantic_duplicate_count,
                 "semantic_duplicate_matches": semantic_duplicate_matches,
+                "ai_duplicate_checks": ai_duplicate_checks,
+                "ai_duplicate_limit": args.ai_duplicate_limit,
                 "source_relevance_reject_count": source_relevance_reject_count,
                 "seen_topic_count": len(seen_topics),
                 "recent_alert_record_count": len(recent_alert_records),
