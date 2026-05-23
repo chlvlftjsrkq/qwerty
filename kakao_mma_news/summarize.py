@@ -456,7 +456,7 @@ def _render_codex_summary(
                 summary = _fallback_article_summary(article)
             opinion = _clean_text(model_item.get("opinion"), 100) or (_article_opinion(article, agency_name) if article else "")
             url = _clean_text(model_item.get("url"), 500) or (article.url if article else "")
-            source = _clean_text(model_item.get("source"), 100) or (article.source if article else "?ㅼ씠踰??댁뒪")
+            source = _clean_text(model_item.get("source"), 100) or (article.source if article else "네이버 뉴스")
             try:
                 related_count = max(0, int(model_item.get("related_count") or 0))
             except (TypeError, ValueError):
@@ -485,18 +485,18 @@ def _render_codex_summary(
             excluded_note = _clean_excluded_note(data.get("excluded_note"))
             if rendered_items >= min(len(model_items), SUMMARY_ITEM_LIMIT):
                 excluded_note = ""
-            if "以묐났" in excluded_note:
+            if "중복" in excluded_note:
                 excluded_note = ""
             if excluded_note:
                 lines.extend([excluded_note, ""])
 
             one_line = _clean_text(data.get("one_line"), 220)
             if not one_line:
-                one_line = _one_line_summary(articles, agency_name) if articles else f"?ㅻ뒛? 怨듭쑀??留뚰븳 {agency_name} 吏곸젒 愿???댁뒪媛 ?뺤씤?섏? ?딆븯?듬땲??"
+                one_line = _one_line_summary(articles, agency_name) if articles else f"오늘은 공유할 만한 {agency_name} 직접 관련 뉴스가 확인되지 않았습니다."
 
             lines.extend(
                 [
-                    "?ㅻ뒛 ??以??붿빟 ?렞",
+                    "오늘 한 줄 요약 🎯",
                     one_line,
                 ]
             )
