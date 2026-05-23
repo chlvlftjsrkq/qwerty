@@ -167,7 +167,7 @@ def load_config(env_file: str | Path | None = ".env") -> Config:
             os.getenv("POLICY_RSS_URLS"),
             ["https://www.korea.kr/rss/pressrelease.xml"],
         ),
-        max_items=parse_int(os.getenv("NEWS_MAX_ITEMS"), 40),
+        max_items=parse_int(os.getenv("NEWS_MAX_ITEMS"), 200),
         lookback_days=parse_int(os.getenv("NEWS_LOOKBACK_DAYS"), 2),
         fetch_article_text=parse_bool(os.getenv("FETCH_ARTICLE_TEXT"), False),
         request_timeout_seconds=parse_float(os.getenv("REQUEST_TIMEOUT_SECONDS"), 15.0),

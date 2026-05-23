@@ -1,3 +1,4 @@
+import re
 import unittest
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
@@ -125,7 +126,7 @@ class CoreTests(unittest.TestCase):
         )
         summary = _render_codex_summary(article.published_date_kst, data, [article], "병무청")
         self.assertIn("🪖 2026-05-15 병무청 뉴스 브리핑", summary)
-        self.assertIn("# 1️⃣ 전북지방병무청, 경진대회", summary)
+        self.assertIn("1️⃣ 전북지방병무청, 경진대회", summary)
         self.assertIn("Opinion: 행정 품질 개선 효과를 확인할 필요가 있다.", summary)
         self.assertIn("Source: https://example.com/news", summary)
         self.assertNotIn("Source: example.com / https://example.com/news", summary)
@@ -202,8 +203,8 @@ class CoreTests(unittest.TestCase):
             "one_line": "삼성전자 관련 주요 흐름입니다.",
         }
         summary = _render_codex_summary(articles[0].published_date_kst, data, articles, "삼성전자")
-        self.assertEqual(summary.count("\n# "), 10)
-        self.assertIn("# 🔟 삼성전자 주요 기사 10", summary)
+        self.assertEqual(sum(1 for line in summary.splitlines() if re.match(r"^(?:[1-9]️⃣|🔟) ", line)), 10)
+        self.assertIn("🔟 삼성전자 주요 기사 10", summary)
         self.assertNotIn("삼성전자 주요 기사 11", summary)
 
     def test_summary_fit_drops_opinion_first(self):
@@ -650,7 +651,7 @@ class CoreTests(unittest.TestCase):
             briefing_priority_score(local, config),
         )
 
-    def test_codex_summary_render_backfills_to_ten_in_article_order(self):
+    def test_codex_summary_render_uses_model_selected_items_only(self):
         articles = [
             Article(
                 title=f"{idx}번 병무청 관련 기사",
@@ -679,10 +680,9 @@ class CoreTests(unittest.TestCase):
             articles,
             "병무청",
         )
-        self.assertIn("1️⃣ 1번 병무청 관련 기사", summary)
-        self.assertIn("2️⃣ 2번 병무청 관련 기사", summary)
-        self.assertIn("🔟 10번 병무청 관련 기사", summary)
-        self.assertNotIn("11번 병무청 관련 기사", summary)
+        self.assertIn("1️⃣ 2번 병무청 관련 기사", summary)
+        self.assertNotIn("1번 병무청 관련 기사", summary)
+        self.assertNotIn("10번 병무청 관련 기사", summary)
         self.assertNotIn("중복 기사는 제외했습니다", summary)
 
     def test_negative_watch_rejects_mismatched_naver_snippet(self):

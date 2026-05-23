@@ -215,6 +215,7 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           NAVER_NEWS_PAGES: ${{ vars.NAVER_NEWS_PAGES || '5' }}
+          NEWS_MAX_ITEMS: ${{ vars.NEWS_MAX_ITEMS || '200' }}
           GOOGLE_NEWS_ENABLED: "false"
           POLICY_RSS_ENABLED: "false"
           KSKILL_PROXY_BASE_URL: ${{ vars.KSKILL_PROXY_BASE_URL || 'https://k-skill-proxy.nomadamas.org' }}

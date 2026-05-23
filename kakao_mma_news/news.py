@@ -557,14 +557,20 @@ def _filter_articles(articles: Iterable[Article], config: Config, target_date: d
             )
         filtered.append(article)
 
-    filtered.sort(
-        key=lambda item: (
-            briefing_priority_score(item, config),
-            relevance_score(item, config.query_terms),
-            item.published_at or datetime.min.replace(tzinfo=timezone.utc),
-        ),
-        reverse=True,
-    )
+    if config.summary_provider == "codex":
+        filtered.sort(
+            key=lambda item: item.published_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+    else:
+        filtered.sort(
+            key=lambda item: (
+                briefing_priority_score(item, config),
+                relevance_score(item, config.query_terms),
+                item.published_at or datetime.min.replace(tzinfo=timezone.utc),
+            ),
+            reverse=True,
+        )
     return filtered
 
 

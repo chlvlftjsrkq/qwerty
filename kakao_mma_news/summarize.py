@@ -14,7 +14,7 @@ from .news import Article, normalize_space
 from .weather import build_weather_summary
 
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-CODEX_INPUT_ARTICLE_LIMIT = 24
+CODEX_INPUT_ARTICLE_LIMIT = 200
 SUMMARY_ITEM_LIMIT = 10
 KAKAO_MESSAGE_SOFT_LIMIT = 2900
 
@@ -55,8 +55,8 @@ def codex_article_payload(articles: list[Article], limit: int = CODEX_INPUT_ARTI
                 "title": article.title,
                 "source": article.source[:80],
                 "published_at": published,
-                "summary": article.summary[:600],
-                "content": article.content[:500],
+                "summary": article.summary[:450],
+                "content": article.content[:250],
                 "url": article.url,
             }
         )
@@ -231,6 +231,54 @@ def _summary_article_groups(
     return groups
 
 
+def _article_lookup_keys(article: Article) -> list[str]:
+    return [
+        article.url,
+        _clean_title(article.title),
+        article.source + "|" + _clean_title(article.title),
+    ]
+
+
+def _model_item_article(
+    model_item: dict[str, Any],
+    articles: list[Article],
+) -> Article | None:
+    raw_no = _clean_text(model_item.get("no"))
+    if raw_no.isdigit():
+        index = int(raw_no) - 1
+        if 0 <= index < len(articles):
+            return articles[index]
+
+    by_key: dict[str, Article] = {}
+    for article in articles:
+        for key in _article_lookup_keys(article):
+            if key:
+                by_key.setdefault(key, article)
+
+    url = _clean_text(model_item.get("url"), 500)
+    if url and url in by_key:
+        return by_key[url]
+    title = _clean_title(model_item.get("title"))
+    if title and title in by_key:
+        return by_key[title]
+    source = _clean_text(model_item.get("source"))
+    if source and title and f"{source}|{title}" in by_key:
+        return by_key[f"{source}|{title}"]
+    return None
+
+
+def _model_group_key(model_item: dict[str, Any], article: Article | None) -> str:
+    if article is not None:
+        return _article_group_key(article)
+    topic_key = _article_topic_key(
+        _clean_text(model_item.get("title")),
+        _clean_text(model_item.get("summary")),
+    )
+    if topic_key:
+        return topic_key
+    return ""
+
+
 def _grouped_article_summary(article: Article, related_count: int) -> str:
     key = _article_group_key(article)
     if key.startswith("인물:"):
@@ -390,6 +438,70 @@ def _render_codex_summary(
         if _clean_title(item.get("title"))
     }
 
+    if model_items:
+        seen_model_keys: set[str] = set()
+        for model_item in model_items:
+            if rendered_items >= SUMMARY_ITEM_LIMIT:
+                break
+            article = _model_item_article(model_item, articles)
+            group_key = _model_group_key(model_item, article)
+            if group_key and group_key in seen_model_keys:
+                continue
+            if group_key:
+                seen_model_keys.add(group_key)
+
+            title = _clean_title(model_item.get("title")) or (_clean_title(article.title) if article else "")
+            summary = _clean_text(model_item.get("summary"), 130)
+            if not summary and article:
+                summary = _fallback_article_summary(article)
+            opinion = _clean_text(model_item.get("opinion"), 100) or (_article_opinion(article, agency_name) if article else "")
+            url = _clean_text(model_item.get("url"), 500) or (article.url if article else "")
+            source = _clean_text(model_item.get("source"), 100) or (article.source if article else "?ㅼ씠踰??댁뒪")
+            try:
+                related_count = max(0, int(model_item.get("related_count") or 0))
+            except (TypeError, ValueError):
+                related_count = 0
+            if not title or not summary:
+                continue
+
+            rendered_items += 1
+            number = (
+                NUMBER_EMOJI[rendered_items - 1]
+                if rendered_items <= len(NUMBER_EMOJI)
+                else f"{rendered_items}."
+            )
+            lines.extend(
+                [
+                    f"{number} {title}",
+                    summary,
+                    *([f"관련 보도: {related_count}건 추가 묶음"] if related_count else []),
+                    *([f"Opinion: {opinion}"] if opinion else []),
+                    f"Source: {url or source}",
+                    "",
+                ]
+            )
+
+        if rendered_items:
+            excluded_note = _clean_excluded_note(data.get("excluded_note"))
+            if rendered_items >= min(len(model_items), SUMMARY_ITEM_LIMIT):
+                excluded_note = ""
+            if "以묐났" in excluded_note:
+                excluded_note = ""
+            if excluded_note:
+                lines.extend([excluded_note, ""])
+
+            one_line = _clean_text(data.get("one_line"), 220)
+            if not one_line:
+                one_line = _one_line_summary(articles, agency_name) if articles else f"?ㅻ뒛? 怨듭쑀??留뚰븳 {agency_name} 吏곸젒 愿???댁뒪媛 ?뺤씤?섏? ?딆븯?듬땲??"
+
+            lines.extend(
+                [
+                    "?ㅻ뒛 ??以??붿빟 ?렞",
+                    one_line,
+                ]
+            )
+            return _fit_summary_for_kakao("\n".join(lines))
+
     article_groups = _summary_article_groups(articles)
     for group in article_groups:
         article = group["article"]
@@ -485,16 +597,20 @@ def summarize_with_codex(config: Config, target_date: date, articles: list[Artic
             f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
             "Do not ask the user to paste articles; the file already exists in the workspace.",
             "Do not infer unsupported facts.",
-            f"Exclude or briefly down-rank articles that are weakly related to {agency_name}.",
-            "Preserve the input article order in the items array. Do not reorder by your own judgment.",
+            f"Exclude articles that are weakly related to {agency_name}.",
+            "Review all input articles and select the most important briefing items yourself. Do not simply copy the first articles.",
+            "Return the selected items in your own importance order.",
             "Include up to 10 usable briefing items.",
-            "When several articles cover the same person or same event, keep the earliest/highest-priority article as the representative and treat the rest as related coverage instead of repeating the same issue.",
+            "For 병무청 briefings, balance the final selection: major public or legal military-service issues, direct 병무청 policy or official activity, and meaningful 지방병무청/local office news should all be considered when present.",
+            "Do not let many articles about one celebrity or one event fill the whole briefing. Pick one representative item for the same person or event and set related_count to the number of additional related articles.",
+            "When several articles cover the same person or same event, keep the strongest representative article and treat the rest as related coverage instead of repeating the same issue.",
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
             "For each item title, preserve the full source title from the input. Do not shorten it in your output.",
             "For each item summary, write one short polite spoken Korean sentence under 80 Korean characters.",
             "Do not mention ellipses, title-shortening marks, JSON, or formatting rules in excluded_note.",
-            f'Required JSON schema: {{"items":[{{"title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL"}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
-            "items는 입력 기사 순서 그대로 가능하면 10개, 최대 10개까지 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
+            "For each item, include the selected input article no whenever possible, and include related_count when you grouped duplicate coverage.",
+            f'Required JSON schema: {{"items":[{{"no":"입력 번호","title":"기사 제목 전체","summary":"기사 요약 1~2문장","opinion":"{policy_perspective} 관점의 확인 포인트 1문장","source":"매체명","url":"원문 URL","related_count":0}}],"excluded_note":"관련성이 낮거나 중복이라 제외한 기사 설명. 없으면 빈 문자열","one_line":"전체 흐름 한 문장 요약"}}',
+            "items는 당신이 판단한 중요도 순서로 최대 10개까지 포함하고, source와 url은 입력 기사에 있는 값만 사용한다.",
         ]
     )
     output_file = tempfile.NamedTemporaryFile(
