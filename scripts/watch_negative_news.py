@@ -905,7 +905,9 @@ def duplicate_with_codex(
             "classification": asdict(classification),
             "topic_key": topic_fingerprint(item, classification),
         },
-        "recent_sent_alerts": [compact_alert_record_for_ai(record) for record in recent_records[:20]],
+        "comparison_alerts": [compact_alert_record_for_ai(record) for record in recent_records[:30]],
+        # Keep the old key as a compatibility hint for older prompt traces.
+        "recent_sent_alerts": [compact_alert_record_for_ai(record) for record in recent_records[:30]],
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -933,6 +935,7 @@ def duplicate_with_codex(
             "Read only this JSON file:",
             str(input_path.resolve()),
             "Decide whether the candidate is substantially the same issue as any recent sent alert.",
+            "The comparison_alerts list can include alerts already selected earlier in this same run. Treat them as prior alerts for duplicate suppression.",
             "Treat it as duplicate when it is the same person, organization, legal dispute, allegation, or military-service controversy even if the news source, title wording, or publication time differs.",
             "Do not mark duplicate merely because both articles mention military service; the concrete issue must overlap.",
             "Return exactly one valid JSON object, no Markdown.",
@@ -982,6 +985,21 @@ def duplicate_with_codex(
                 path.unlink()
             except FileNotFoundError:
                 pass
+
+
+def selected_candidate_record(
+    item: NewsItem,
+    classification: Classification,
+    topic_key: str,
+    selected_at: datetime,
+) -> dict[str, Any]:
+    return alert_record(
+        item,
+        classification,
+        topic_key,
+        selected_at,
+        message="이번 검색 실행에서 이미 먼저 선택된 후보입니다.",
+    )
 
 
 def refine_with_codex(
@@ -1701,7 +1719,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codex-command", default=os.getenv("CODEX_COMMAND", "codex.cmd"))
     parser.add_argument("--codex-model", default=os.getenv("CODEX_MODEL", ""))
     parser.add_argument("--codex-timeout-seconds", type=float, default=float(os.getenv("CODEX_TIMEOUT_SECONDS", "120")))
-    parser.add_argument("--ai-duplicate-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_DUPLICATE_LIMIT", "8")))
+    parser.add_argument("--ai-duplicate-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_DUPLICATE_LIMIT", "30")))
     parser.add_argument("--ai-refine-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_REFINE_LIMIT", "3")))
     parser.add_argument("--summary-provider", default=os.getenv("NEGATIVE_WATCH_SUMMARY_PROVIDER", "codex"))
     parser.add_argument("--naver-client-id", default=os.getenv("NAVER_CLIENT_ID", ""))
@@ -1857,6 +1875,7 @@ def main() -> int:
     raw_pairs.sort(key=lambda pair: (pair[1].score, pair[0].published_at), reverse=True)
 
     heuristic_pairs: list[tuple[NewsItem, Classification, str]] = []
+    selected_candidate_records: list[dict[str, Any]] = []
     run_topics: set[str] = set()
     topic_duplicate_count = 0
     topic_duplicate_matches: list[dict[str, str]] = []
@@ -1864,31 +1883,19 @@ def main() -> int:
     semantic_duplicate_matches: list[dict[str, str]] = []
     ai_duplicate_checks = 0
     for item, classification, topic_key in raw_pairs:
-        if topic_key in seen_topics or topic_key in run_topics:
-            topic_duplicate_count += 1
-            reason = (
-                "최근 12시간 이내 같은 토픽 키가 이미 발송 이력에 있어 규칙 기반 중복으로 제외했습니다."
-                if topic_key in seen_topics
-                else "이번 검색 실행 안에서 같은 토픽 후보를 이미 처리해 중복으로 제외했습니다."
-            )
-            topic_duplicate_matches.append(
-                {
-                    "title": item.title,
-                    "topic_key": topic_key,
-                    "reason": reason,
-                }
-            )
-            continue
+        comparison_records = recent_alert_records + selected_candidate_records
+        checked_with_ai = False
         if (
             args.summary_provider.lower() == "codex"
             and classification.score >= 5
             and ai_duplicate_checks < max(0, args.ai_duplicate_limit)
         ):
             ai_duplicate_checks += 1
+            checked_with_ai = True
             is_duplicate, matched_topic_key, duplicate_reason = duplicate_with_codex(
                 item,
                 classification,
-                recent_alert_records,
+                comparison_records,
                 codex_command=args.codex_command,
                 codex_model=args.codex_model,
                 timeout_seconds=args.codex_timeout_seconds,
@@ -1907,8 +1914,26 @@ def main() -> int:
                     }
                 )
                 continue
+        if not checked_with_ai and (topic_key in seen_topics or topic_key in run_topics):
+            topic_duplicate_count += 1
+            reason = (
+                "Codex 중복 판단 한도 또는 실행 환경 문제로 규칙 기반 토픽 키를 보조 적용했습니다."
+                if topic_key in seen_topics
+                else "Codex 중복 판단 한도 또는 실행 환경 문제로 이번 실행 내 토픽 키 중복을 보조 적용했습니다."
+            )
+            topic_duplicate_matches.append(
+                {
+                    "title": item.title,
+                    "topic_key": topic_key,
+                    "reason": reason,
+                }
+            )
+            continue
         run_topics.add(topic_key)
         heuristic_pairs.append((item, classification, topic_key))
+        selected_candidate_records.append(
+            selected_candidate_record(item, classification, topic_key, now)
+        )
 
     classified: list[tuple[NewsItem, Classification, str]] = []
     for index, (item, classification, topic_key) in enumerate(heuristic_pairs):

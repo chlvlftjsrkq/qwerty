@@ -96,7 +96,7 @@ jobs:
           CODEX_MODEL: ${{ vars.CODEX_MODEL || '' }}
           CODEX_TIMEOUT_SECONDS: ${{ vars.CODEX_TIMEOUT_SECONDS || '120' }}
           NEGATIVE_WATCH_SUMMARY_PROVIDER: ${{ vars.NEGATIVE_WATCH_SUMMARY_PROVIDER || 'codex' }}
-          NEGATIVE_WATCH_AI_DUPLICATE_LIMIT: ${{ vars.NEGATIVE_WATCH_AI_DUPLICATE_LIMIT || '8' }}
+          NEGATIVE_WATCH_AI_DUPLICATE_LIMIT: ${{ vars.NEGATIVE_WATCH_AI_DUPLICATE_LIMIT || '30' }}
           NEGATIVE_WATCH_IMAGE_SIZE: ${{ vars.NEGATIVE_WATCH_IMAGE_SIZE || '1024x1024' }}
           MAX_ALERTS_INPUT: ${{ github.event.inputs.max_alerts || '1' }}
           LOOKBACK_HOURS_INPUT: ${{ github.event.inputs.lookback_hours || '168' }}
