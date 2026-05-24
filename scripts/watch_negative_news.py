@@ -143,6 +143,17 @@ INSTITUTION_REPUTATION_TERMS = (
     "금수",
 )
 
+AI_REVIEW_TERMS = tuple(
+    dict.fromkeys(
+        [
+            *CORE_ISSUE_RELEVANCE_TERMS,
+            *INSTITUTION_REPUTATION_TERMS,
+            *STRONG_NEGATIVE_TERMS.keys(),
+            *CONTEXT_TERMS.keys(),
+        ]
+    )
+)
+
 SOFT_EXCLUDE_TERMS = [
     "입영문화제",
     "병역진로설계",
@@ -708,6 +719,15 @@ def classify_heuristic(item: NewsItem) -> Classification:
         score=score,
         matched_terms=matched,
     )
+
+
+def should_review_with_codex(item: NewsItem, classification: Classification) -> bool:
+    if classification.score > 0:
+        return True
+    haystack = clean_text(f"{item.title} {item.summary} {item.query}").casefold()
+    if "병무청" in haystack:
+        return True
+    return any(term.casefold() in haystack for term in AI_REVIEW_TERMS)
 
 
 def remove_korean_particle_spacing(text: str) -> str:
@@ -1803,7 +1823,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codex-model", default=os.getenv("CODEX_MODEL", ""))
     parser.add_argument("--codex-timeout-seconds", type=float, default=float(os.getenv("CODEX_TIMEOUT_SECONDS", "120")))
     parser.add_argument("--ai-duplicate-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_DUPLICATE_LIMIT", "30")))
-    parser.add_argument("--ai-refine-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_REFINE_LIMIT", "3")))
+    parser.add_argument("--ai-refine-limit", type=int, default=int(os.getenv("NEGATIVE_WATCH_AI_REFINE_LIMIT", "30")))
     parser.add_argument("--summary-provider", default=os.getenv("NEGATIVE_WATCH_SUMMARY_PROVIDER", "codex"))
     parser.add_argument("--naver-client-id", default=os.getenv("NAVER_CLIENT_ID", ""))
     parser.add_argument("--naver-client-secret", default=os.getenv("NAVER_CLIENT_SECRET", ""))
@@ -1924,6 +1944,7 @@ def main() -> int:
         return classification
 
     source_relevance_cache: dict[str, bool] = {}
+    use_codex_judgement = args.summary_provider.lower() == "codex"
 
     def source_supports_cached(item: NewsItem) -> bool:
         key = item_key(item)
@@ -1939,10 +1960,11 @@ def main() -> int:
     source_relevance_reject_count = 0
     for item in new_items:
         classification = classify_cached(item)
-        if classification.score <= 0:
+        review_with_codex = use_codex_judgement and should_review_with_codex(item, classification)
+        if classification.score <= 0 and not review_with_codex:
             continue
         inspected_keys.append(item_key(item))
-        if classification.score >= 5 and not source_supports_cached(item):
+        if classification.score >= 5 and not source_supports_cached(item) and not review_with_codex:
             source_relevance_reject_count += 1
             continue
         raw_pairs.append((item, classification, topic_fingerprint(item, classification)))
@@ -1961,7 +1983,7 @@ def main() -> int:
         comparison_records = recent_alert_records + selected_candidate_records
         checked_with_ai = False
         if (
-            args.summary_provider.lower() == "codex"
+            use_codex_judgement
             and classification.score >= 5
             and ai_duplicate_checks < max(0, args.ai_duplicate_limit)
         ):
@@ -2022,8 +2044,7 @@ def main() -> int:
     classified: list[tuple[NewsItem, Classification, str]] = []
     for index, (item, classification, topic_key) in enumerate(heuristic_pairs):
         if (
-            args.summary_provider.lower() == "codex"
-            and classification.score >= 5
+            use_codex_judgement
             and index < max(0, args.ai_refine_limit)
         ):
             classification = refine_with_codex(

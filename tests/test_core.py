@@ -43,6 +43,7 @@ from scripts.watch_negative_news import (
     merge_recent_alert_records,
     prune_sent_alerts,
     recent_seen_records_from_urls,
+    should_review_with_codex,
     topic_fingerprint,
 )
 
@@ -694,6 +695,28 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(has_institution_reputation_context(f"{item.title} {item.summary}"))
         self.assertTrue(classification.send)
         self.assertGreaterEqual(classification.score, 6)
+
+    def test_negative_watch_uses_codex_review_for_broad_mma_context(self):
+        item = NewsItem(
+            title="중립 제목",
+            url="https://example.com/review",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-24T15:25:00+09:00",
+            summary="점심 메뉴 논란이 제기됐습니다.",
+            query="병무청 논란",
+        )
+        classification = Classification(
+            send=False,
+            severity="낮음",
+            category="병무청 평판 리스크",
+            summary="",
+            reason="",
+            score=0,
+            matched_terms=[],
+        )
+
+        self.assertTrue(should_review_with_codex(item, classification))
 
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))
