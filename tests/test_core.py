@@ -672,8 +672,9 @@ class CoreTests(unittest.TestCase):
         self.assertIn("부정 이슈 탐지 테스트 리포트", message)
         self.assertIn("AI 중복 판단", message)
         self.assertIn("최근 발송한 같은 인물의 같은 병역 논란입니다.", message)
-        self.assertIn("최근 12시간 비교 대상", message)
+        self.assertIn("최근 12시간 실제 알림 비교 대상", message)
         self.assertIn("최근 12시간 실제 알림 이력", message)
+        self.assertIn("실제 알림 이력에는 포함하지 않습니다", message)
         self.assertIn("신규 검색 기사", message)
         self.assertIn("https://example.com/a", message)
 

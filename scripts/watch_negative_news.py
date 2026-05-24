@@ -1645,12 +1645,13 @@ def build_diagnostic_report(
         lines.append("- 중복 아님: 후보는 있었지만 최종 발송 조건을 통과하지 못했습니다.")
 
     lines.extend(["", f"AI 중복 비교 실행: {ai_duplicate_checks}회", f"실제 알림 발송: {len(alerts)}건"])
-    lines.extend(["", "최근 12시간 비교 대상"])
+    lines.extend(["", "최근 12시간 실제 알림 비교 대상"])
     if recent_alert_records:
         for index, record in enumerate(recent_alert_records[:5], start=1):
             lines.extend(report_record_lines("-", record, index=index))
     else:
-        lines.append("- 최근 12시간 안에 비교할 발송·확인 이력이 없습니다.")
+        lines.append("- 최근 12시간 안에 실제 발송된 알림이 없습니다.")
+    lines.append("- 참고: 후보에서 제외된 기사는 재처리 방지용 내부 기록으로만 남기며, 실제 알림 이력에는 포함하지 않습니다.")
 
     lines.extend(["", "신규 검색 기사"])
     if new_items:
@@ -1840,7 +1841,7 @@ def main() -> int:
                     "deduped_recent_count": 0,
                     "new_count": 0,
                     "topic_duplicate_count": 0,
-                    "seen_topic_count": 0,
+                    "processed_topic_count": 0,
                     "alert_count": 0,
                     "posted": 0,
                     "errors": [],
@@ -1852,6 +1853,7 @@ def main() -> int:
         return 0
 
     state = load_state(state_path)
+    # Internal processing cache only. Actual sent-alert history lives in sent_alerts.
     seen_urls: dict[str, str] = state.get("seen_urls", {})
     seen_topics: dict[str, str] = prune_seen_topics(
         state.get("seen_topics", {}),
@@ -2080,7 +2082,7 @@ def main() -> int:
                 "ai_duplicate_checks": ai_duplicate_checks,
                 "ai_duplicate_limit": args.ai_duplicate_limit,
                 "source_relevance_reject_count": source_relevance_reject_count,
-                "seen_topic_count": len(seen_topics),
+                "processed_topic_count": len(seen_topics),
                 "recent_alert_record_count": len(recent_alert_records),
                 "alert_count": len(alerts),
                 "alerts": [
@@ -2207,7 +2209,7 @@ def main() -> int:
                 "topic_duplicate_matches": topic_duplicate_matches,
                 "semantic_duplicate_count": semantic_duplicate_count,
                 "ai_duplicate_checks": ai_duplicate_checks,
-                "seen_topic_count": len(seen_topics),
+                "processed_topic_count": len(seen_topics),
                 "recent_alert_record_count": len(recent_alert_records),
                 "candidate_path": str(candidates_path),
                 "alert_count": len(alerts),
