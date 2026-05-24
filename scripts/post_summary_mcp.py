@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import ctypes
 import json
 import shutil
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +26,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-chars", type=int, default=3000, help="Maximum characters per KakaoTalk message")
     parser.add_argument("--open-attempts", type=int, default=4, help="KakaoTalk room open retry attempts")
     parser.add_argument("--open-retry-wait", type=float, default=1.5, help="Seconds to wait between room open retries")
-    parser.add_argument("--allow-mouse-send-fallback", action="store_true", help="Allow the older mouse-click based MCP sender if no-mouse sending fails")
     parser.add_argument("--verify", action="store_true", help="Read recent messages and verify the first chunk")
     return parser.parse_args()
 
@@ -48,51 +45,6 @@ def parse_tool_json(result: Any) -> dict[str, Any]:
         return json.loads(text)
     except json.JSONDecodeError:
         return {"raw": text}
-
-
-def send_message_without_mouse(room: str, message: str) -> dict[str, Any]:
-    """Paste and send text into the Kakao edit control without clicking the chat body."""
-    try:
-        import win32clipboard
-        import win32con
-        import win32gui
-        from kakao_mcp import controller
-    except Exception as exc:
-        return {"success": False, "error": f"safe_send_unavailable: {exc}"}
-
-    hwnd = controller.find_chat_window(room)
-    if hwnd is None:
-        return {"success": False, "error": f"Chat window '{room}' not found"}
-    edit_hwnd = controller.find_child_window_recursive(hwnd, controller.config.KAKAO_EDIT_CLASS)
-    if edit_hwnd is None:
-        return {"success": False, "error": f"Edit control not found in '{room}'"}
-
-    controller.bring_window_to_front(hwnd)
-    time.sleep(0.25)
-
-    user32 = ctypes.windll.user32
-    try:
-        win32gui.SetFocus(edit_hwnd)
-    except Exception:
-        user32.SetFocus(int(edit_hwnd))
-    time.sleep(0.1)
-
-    win32clipboard.OpenClipboard()
-    try:
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardText(message, win32con.CF_UNICODETEXT)
-    finally:
-        win32clipboard.CloseClipboard()
-
-    user32.keybd_event(0x11, 0, 0, 0)  # Ctrl down
-    user32.keybd_event(0x56, 0, 0, 0)  # V down
-    user32.keybd_event(0x56, 0, 0x0002, 0)  # V up
-    user32.keybd_event(0x11, 0, 0x0002, 0)  # Ctrl up
-    time.sleep(0.25)
-
-    user32.keybd_event(0x0D, 0, 0, 0)
-    user32.keybd_event(0x0D, 0, 0x0002, 0)
-    return {"success": True, "message": f"Message sent to '{room}' with no mouse click"}
 
 
 async def call_tool(session: ClientSession, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -158,13 +110,11 @@ async def post_summary(args: argparse.Namespace) -> int:
             sent = []
             for index, chunk in enumerate(chunks, start=1):
                 body = chunk if len(chunks) == 1 else f"({index}/{len(chunks)})\n{chunk}"
-                result = send_message_without_mouse(args.room, body)
-                if result.get("error") and args.allow_mouse_send_fallback:
-                    result = await call_tool(
-                        session,
-                        "kakao_send_message",
-                        {"room_name": args.room, "message": body},
-                    )
+                result = await call_tool(
+                    session,
+                    "kakao_send_message",
+                    {"room_name": args.room, "message": body},
+                )
                 sent.append(result)
                 if result.get("error"):
                     print(json.dumps({"send_results": sent}, ensure_ascii=False))
