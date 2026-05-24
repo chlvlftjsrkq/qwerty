@@ -721,7 +721,9 @@ class CoreTests(unittest.TestCase):
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 21, 59, tzinfo=timezone.utc), 8, 22))
-        self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 0, tzinfo=timezone.utc), 8, 22))
+        self.assertTrue(in_active_window(datetime(2026, 5, 19, 22, 0, tzinfo=timezone.utc), 8, 22))
+        self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 1, tzinfo=timezone.utc), 8, 22))
+        self.assertFalse(in_active_window(datetime(2026, 5, 19, 22, 15, tzinfo=timezone.utc), 8, 22))
         self.assertFalse(in_active_window(datetime(2026, 5, 19, 7, 59, tzinfo=timezone.utc), 8, 22))
 
     def test_mma_briefing_priority_orders_issue_before_national_before_local(self):

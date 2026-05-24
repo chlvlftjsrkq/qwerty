@@ -571,9 +571,10 @@ def in_active_window(now: datetime, start_hour: int, end_hour: int) -> bool:
     end = end_hour % 24
     if start == end:
         return True
+    on_end_boundary = now.hour == end and now.minute == 0
     if start < end:
-        return start <= now.hour < end
-    return now.hour >= start or now.hour < end
+        return start <= now.hour < end or on_end_boundary
+    return now.hour >= start or now.hour < end or on_end_boundary
 
 
 def normalize_topic_token(value: str) -> str:
