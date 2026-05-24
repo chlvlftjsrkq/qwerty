@@ -38,6 +38,7 @@ from scripts.watch_negative_news import (
     classify_heuristic,
     extract_topic_entity,
     has_core_issue_relevance,
+    has_institution_reputation_context,
     in_active_window,
     merge_recent_alert_records,
     prune_sent_alerts,
@@ -672,8 +673,26 @@ class CoreTests(unittest.TestCase):
         self.assertIn("AI 중복 판단", message)
         self.assertIn("최근 발송한 같은 인물의 같은 병역 논란입니다.", message)
         self.assertIn("최근 12시간 비교 대상", message)
+        self.assertIn("최근 12시간 실제 알림 이력", message)
         self.assertIn("신규 검색 기사", message)
         self.assertIn("https://example.com/a", message)
+
+    def test_negative_watch_detects_institution_reputation_issue(self):
+        item = NewsItem(
+            title="강명구 세월호 어묵국 국회 메뉴 비판",
+            url="https://example.com/reputation",
+            naver_url="",
+            source="example.com",
+            published_at="2026-05-24T15:25:00+09:00",
+            summary="병무청 기관의 점심 메뉴가 세월호 참사일 어묵국이었다는 논란이 제기됐고 사퇴 요구가 나왔습니다.",
+            query="병무청 논란",
+        )
+
+        classification = classify_heuristic(item)
+
+        self.assertTrue(has_institution_reputation_context(f"{item.title} {item.summary}"))
+        self.assertTrue(classification.send)
+        self.assertGreaterEqual(classification.score, 6)
 
     def test_negative_watch_active_window(self):
         self.assertTrue(in_active_window(datetime(2026, 5, 19, 8, 0, tzinfo=timezone.utc), 8, 22))

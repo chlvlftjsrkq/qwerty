@@ -82,6 +82,11 @@ STRONG_NEGATIVE_TERMS = {
     "의혹": 3,
     "비판": 3,
     "고발": 4,
+    "사퇴": 4,
+    "패륜": 5,
+    "세월호": 3,
+    "어묵국": 4,
+    "금수": 4,
 }
 
 CONTEXT_TERMS = {
@@ -125,6 +130,17 @@ CORE_ISSUE_RELEVANCE_TERMS = (
     "고의발치",
     "발치",
     "치아",
+)
+
+INSTITUTION_REPUTATION_TERMS = (
+    "논란",
+    "비판",
+    "의혹",
+    "사퇴",
+    "패륜",
+    "세월호",
+    "어묵국",
+    "금수",
 )
 
 SOFT_EXCLUDE_TERMS = [
@@ -287,6 +303,11 @@ def has_core_issue_relevance(text: str) -> bool:
     return any(term.casefold() in folded for term in CORE_ISSUE_RELEVANCE_TERMS)
 
 
+def has_institution_reputation_context(text: str) -> bool:
+    folded = clean_text(text).casefold()
+    return "병무청" in folded and any(term.casefold() in folded for term in INSTITUTION_REPUTATION_TERMS)
+
+
 def fetch_article_meta_text(url: str, timeout: float) -> str:
     if not url:
         return ""
@@ -325,11 +346,13 @@ def article_source_supports_issue(item: NewsItem, timeout: float) -> bool:
     # military-service issue context.
     if has_core_issue_relevance(item.title):
         return True
+    if has_institution_reputation_context(f"{item.title} {item.summary}"):
+        return True
     try:
         meta_text = fetch_article_meta_text(item.url or item.naver_url, timeout)
     except Exception:
         return False
-    return has_core_issue_relevance(meta_text)
+    return has_core_issue_relevance(meta_text) or has_institution_reputation_context(meta_text)
 
 
 def fetch_naver_news(
@@ -1585,7 +1608,7 @@ def build_diagnostic_report(
         f"- 신규 기사: {new_count}건",
         f"- 부정 이슈 후보: {raw_candidate_count}건",
         f"- 원문 확인 제외: {source_relevance_reject_count}건",
-        f"- 최근 12시간 발송 이력: {recent_alert_record_count}건",
+        f"- 최근 12시간 실제 알림 이력: {recent_alert_record_count}건",
         "",
         "중복 판단",
     ]
@@ -1595,7 +1618,7 @@ def build_diagnostic_report(
         duplicate_lines.extend(
             [
                 f"- AI 중복 판단: {trim_for_report(match.get('title', ''))}",
-                f"  근거: {trim_for_report(match.get('reason', '') or '최근 12시간 발송 이력과 같은 이슈로 판단했습니다.', 120)}",
+                f"  근거: {trim_for_report(match.get('reason', '') or '최근 12시간 실제 알림 이력과 같은 이슈로 판단했습니다.', 120)}",
             ]
         )
         matched_title = trim_for_report(match.get("matched_title", ""), 72)
@@ -1617,7 +1640,7 @@ def build_diagnostic_report(
     elif raw_candidate_count == 0:
         lines.append("- 판단 대상 없음: 신규 부정 이슈 후보가 없었습니다.")
     elif alerts:
-        lines.append("- 중복 아님: 최근 12시간 발송 이력과 다른 후보가 있어 알림 대상으로 남겼습니다.")
+        lines.append("- 중복 아님: 최근 12시간 실제 알림 이력과 다른 후보가 있어 알림 대상으로 남겼습니다.")
     else:
         lines.append("- 중복 아님: 후보는 있었지만 최종 발송 조건을 통과하지 못했습니다.")
 
@@ -1887,16 +1910,7 @@ def main() -> int:
                 continue
             seen_topics.setdefault(topic_fingerprint(item, classification), seen_urls[key])
 
-    recent_alert_records = merge_recent_alert_records(
-        sent_alerts
-        + recent_seen_records_from_urls(
-            items,
-            seen_urls,
-            classifications,
-            now,
-            args.topic_ttl_hours,
-        )
-    )
+    recent_alert_records = merge_recent_alert_records(sent_alerts)
 
     def classify_cached(item: NewsItem) -> Classification:
         key = item_key(item)
