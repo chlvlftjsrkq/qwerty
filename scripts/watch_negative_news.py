@@ -1798,6 +1798,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Watch Naver news for negative MMA-related issues.")
     parser.add_argument("--room", default=os.getenv("TARGET_CHATROOM", "AI 병무청 데일리 모닝톡"), help="KakaoTalk room title")
     parser.add_argument("--state", default=os.getenv("NEGATIVE_WATCH_STATE", ".scheduler/negative-news-seen.json"))
+    parser.add_argument("--diagnostic-room", default=os.getenv("NEGATIVE_WATCH_DIAGNOSTIC_ROOM", ""))
     parser.add_argument("--output-dir", default=os.getenv("NEGATIVE_WATCH_OUTPUT_DIR", "runs/negative-watch"))
     parser.add_argument("--alert-image", default=os.getenv("NEGATIVE_WATCH_ALERT_IMAGE", ""))
     parser.add_argument("--generate-alert-image", action="store_true", default=os.getenv("NEGATIVE_WATCH_GENERATE_IMAGE", "").strip().lower() in {"1", "true", "yes", "y", "on"})
@@ -2192,7 +2193,8 @@ def main() -> int:
                 alerts=alerts,
                 errors=errors,
             )
-            post_to_kakao(diagnostic_message, room=args.room, mcp_command=args.mcp_command, verify=False)
+            diagnostic_room = args.diagnostic_room.strip() or args.room
+            post_to_kakao(diagnostic_message, room=diagnostic_room, mcp_command=args.mcp_command, verify=False)
             diagnostic_posted = 1
 
         alerts_log = output_dir / f"alerts-{now.strftime('%Y-%m-%d')}.jsonl"
@@ -2232,6 +2234,7 @@ def main() -> int:
                 "ai_duplicate_checks": ai_duplicate_checks,
                 "processed_topic_count": len(seen_topics),
                 "recent_alert_record_count": len(recent_alert_records),
+                "diagnostic_room": args.diagnostic_room.strip() or args.room,
                 "candidate_path": str(candidates_path),
                 "alert_count": len(alerts),
                 "posted": posted,

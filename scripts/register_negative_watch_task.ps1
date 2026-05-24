@@ -14,6 +14,7 @@ param(
     [int]$ActiveStartHour = 8,
     [int]$ActiveEndHour = 22,
     [string]$StateKey = "main",
+    [string]$DiagnosticChatroom = "",
     [string]$TriggerSource = "pc-negative-watch-main",
     [switch]$SendDiagnostic,
     [switch]$DryRun,
@@ -62,6 +63,9 @@ $arguments = @(
     "-SendDiagnostic", "$sendDiagnosticValue",
     "-TriggerSource", "`"$TriggerSource`""
 )
+if (![string]::IsNullOrWhiteSpace($DiagnosticChatroom)) {
+    $arguments += @("-DiagnosticChatroom", "`"$DiagnosticChatroom`"")
+}
 
 $startHour = (($ActiveStartHour % 24) + 24) % 24
 $endHour = (($ActiveEndHour % 24) + 24) % 24

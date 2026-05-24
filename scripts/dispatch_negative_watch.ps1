@@ -12,6 +12,7 @@ param(
     [int]$ActiveStartHour = 8,
     [int]$ActiveEndHour = 22,
     [string]$StateKey = "main",
+    [string]$DiagnosticChatroom = "",
     [string]$DryRun = "false",
     [string]$SendDiagnostic = "false",
     [string]$TriggerSource = "pc-negative-watch-main"
@@ -58,6 +59,9 @@ $argsList = @(
     "--field", "send_diagnostic_report=$(Convert-ToWorkflowBool $SendDiagnostic)",
     "--field", "trigger_source=$TriggerSource"
 )
+if (![string]::IsNullOrWhiteSpace($DiagnosticChatroom)) {
+    $argsList += @("--field", "diagnostic_chatroom=$DiagnosticChatroom")
+}
 
 Set-Location $Root
 Write-Host "Dispatching $Workflow for room '$TargetChatroom' in $Repo..."
@@ -80,6 +84,7 @@ $logObject = [ordered]@{
     active_start_hour = $ActiveStartHour
     active_end_hour = $ActiveEndHour
     state_key = $StateKey
+    diagnostic_chatroom = $DiagnosticChatroom
     dry_run = (Convert-ToWorkflowBool $DryRun)
     send_diagnostic_report = (Convert-ToWorkflowBool $SendDiagnostic)
     trigger_source = $TriggerSource

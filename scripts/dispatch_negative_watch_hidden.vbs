@@ -8,6 +8,7 @@ command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
   & " -Workflow " & Chr(34) & "negative-news-watch.yml" & Chr(34) _
   & " -Ref " & Chr(34) & "main" & Chr(34) _
   & " -GhExe " & Chr(34) & ghPath & Chr(34) _
+  & " -DiagnosticChatroom " & Chr(34) & "test" & Chr(34) _
   & " -MaxAlerts 1" _
   & " -LookbackHours 24" _
   & " -TopicTtlHours 12" _
@@ -15,8 +16,10 @@ command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
   & " -RelatedLimit 5" _
   & " -ActiveStartHour 8" _
   & " -ActiveEndHour 22" _
+  & " -StateKey main" _
   & " -DryRun false" _
-  & " -TriggerSource pc-negative-watch-main"
+  & " -SendDiagnostic true" _
+  & " -TriggerSource pc-negative-watch-main-with-test-report"
 
 shell.CurrentDirectory = root
 shell.Run command, 0, False

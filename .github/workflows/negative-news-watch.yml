@@ -17,6 +17,10 @@ on:
         description: "State/output key for dedupe isolation, for example main or test."
         required: false
         default: "main"
+      diagnostic_chatroom:
+        description: "Optional KakaoTalk room for diagnostic reports. Leave empty to use target_chatroom."
+        required: false
+        default: ""
       max_alerts:
         description: "Maximum alert messages to send in one run."
         required: false
@@ -69,6 +73,7 @@ jobs:
     env:
       PYTHON_EXE: ${{ vars.PYTHON_EXE || 'C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' }}
       TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || 'AI 병무청 데일리 모닝톡' }}
+      DIAGNOSTIC_CHATROOM: ${{ github.event.inputs.diagnostic_chatroom || '' }}
       NEGATIVE_WATCH_STATE_KEY: ${{ github.event.inputs.state_key || 'main' }}
       NEGATIVE_WATCH_STATE: C:\omx\qwerty\.scheduler\negative-news-watch-${{ github.event.inputs.state_key || 'main' }}-seen.json
       NEGATIVE_WATCH_OUTPUT_DIR: runs\negative-watch-${{ github.event.inputs.state_key || 'main' }}
@@ -130,6 +135,9 @@ jobs:
             "--mcp-command", "$mcpCommand",
             "--verify"
           )
+          if (![string]::IsNullOrWhiteSpace("$env:DIAGNOSTIC_CHATROOM")) {
+            $argsList += @("--diagnostic-room", "$env:DIAGNOSTIC_CHATROOM")
+          }
           if ("$env:DRY_RUN_INPUT".Trim().ToLowerInvariant() -eq "true") {
             $argsList += "--dry-run"
           }
@@ -145,6 +153,7 @@ jobs:
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Negative MMA news watch" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target chatroom: $env:TARGET_CHATROOM" -Encoding UTF8
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Diagnostic chatroom: $env:DIAGNOSTIC_CHATROOM" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- State key: $env:NEGATIVE_WATCH_STATE_KEY" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- State file: $env:NEGATIVE_WATCH_STATE" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Output dir: $env:NEGATIVE_WATCH_OUTPUT_DIR" -Encoding UTF8
