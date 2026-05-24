@@ -132,8 +132,7 @@ jobs:
             "--ai-duplicate-limit", "$env:NEGATIVE_WATCH_AI_DUPLICATE_LIMIT",
             "--active-start-hour", "$env:ACTIVE_START_HOUR_INPUT",
             "--active-end-hour", "$env:ACTIVE_END_HOUR_INPUT",
-            "--mcp-command", "$mcpCommand",
-            "--verify"
+            "--mcp-command", "$mcpCommand"
           )
           if (![string]::IsNullOrWhiteSpace("$env:DIAGNOSTIC_CHATROOM")) {
             $argsList += @("--diagnostic-room", "$env:DIAGNOSTIC_CHATROOM")

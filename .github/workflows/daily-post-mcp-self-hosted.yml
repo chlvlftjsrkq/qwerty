@@ -420,7 +420,7 @@ jobs:
           if (!(Test-Path $mcpCommand)) {
             throw "kakaotalk-mcp executable was not found: $mcpCommand"
           }
-          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand" --verify
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand"
 
       - name: Post podcast link to KakaoTalk
         if: ${{ github.event.inputs.send_podcast == 'true' }}
@@ -439,7 +439,7 @@ jobs:
           if (!(Test-Path $mcpCommand)) {
             throw "kakaotalk-mcp executable was not found: $mcpCommand"
           }
-          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$messagePath" --mcp-command "$mcpCommand" --verify
+          & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$messagePath" --mcp-command "$mcpCommand"
 
       - name: Write run summary
         if: always()
