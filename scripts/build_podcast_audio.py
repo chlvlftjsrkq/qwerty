@@ -72,7 +72,7 @@ EMOJI_PATTERN = re.compile(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a podcast MP3 from an agency news briefing Markdown file.")
-    parser.add_argument("--date", required=True, help="Episode date in YYYY-MM-DD.")
+    parser.add_argument("--date", required=True, help="Episode date label in YYYY-MM-DD or YYYY-MM-DD~YYYY-MM-DD.")
     parser.add_argument(
         "--episode-id",
         default="",
@@ -136,6 +136,16 @@ def format_spoken_date(value: str) -> str:
     except ValueError:
         return value
     return f"{parsed.year} 년 {parsed.month} 월 {parsed.day} 일"
+
+
+def validate_date_label(value: str) -> None:
+    parts = [value]
+    for separator in ("~", "-to-"):
+        if separator in value:
+            parts = [part.strip() for part in value.split(separator, 1)]
+            break
+    for part in parts:
+        datetime.strptime(part, "%Y-%m-%d")
 
 
 def _spell_letters(value: str) -> str:
@@ -438,7 +448,7 @@ async def build() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
-    datetime.strptime(args.date, "%Y-%m-%d")
+    validate_date_label(args.date)
     episode_id = args.episode_id.strip() or args.date
     summary_path = Path(args.summary) if args.summary else Path("runs") / f"summary-{args.date}.md"
     if not summary_path.exists():

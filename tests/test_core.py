@@ -26,7 +26,7 @@ from kakao_mma_news.summarize import (
     summarize_heuristic,
 )
 from kakao_mma_news.weather import build_weather_summary
-from scripts.build_podcast_audio import format_spoken_date, markdown_to_speech
+from scripts.build_podcast_audio import format_spoken_date, markdown_to_speech, validate_date_label
 from scripts.is_korean_business_day import business_day_status
 from scripts.watch_negative_news import (
     Classification,
@@ -126,6 +126,10 @@ class CoreTests(unittest.TestCase):
     def test_range_date_labels_for_briefing_and_podcast(self):
         self.assertEqual(summary_date_label(date(2026, 5, 25), date(2026, 5, 22)), "2026-05-22~2026-05-25")
         spoken = format_spoken_date("2026-05-22~2026-05-25")
+        validate_date_label("2026-05-22~2026-05-25")
+        validate_date_label("2026-05-22-to-2026-05-25")
+        with self.assertRaises(ValueError):
+            validate_date_label("2026-05-22~bad")
         self.assertIn("2026 년 5 월 22 일부터", spoken)
         self.assertIn("2026 년 5 월 25 일까지", spoken)
 
