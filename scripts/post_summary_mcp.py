@@ -5,6 +5,7 @@ import asyncio
 import json
 import shutil
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,9 @@ if str(ROOT_DIR) not in sys.path:
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from kakao_mma_news.config import load_config
 from kakao_mma_news.kakao import split_message
+from kakao_mma_news.kakao import post_to_kakao
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,7 +108,32 @@ async def post_summary(args: argparse.Namespace) -> int:
             )
             if open_result.get("error"):
                 print(json.dumps({"open_result": open_result}, ensure_ascii=False))
-                raise RuntimeError(f"Failed to open KakaoTalk room: {args.room}")
+                config = load_config(None)
+                config = replace(
+                    config,
+                    target_chatroom=args.room,
+                    kakao_enabled=True,
+                    kakao_send_enter=True,
+                    kakao_max_chunk_chars=args.max_chars,
+                    kakao_wait_seconds=max(5.0, args.open_retry_wait * 3),
+                    kakao_step_delay_seconds=1.0,
+                )
+                post_to_kakao(config, message)
+                print(
+                    json.dumps(
+                        {
+                            "room": args.room,
+                            "summary": str(summary_path),
+                            "chunks": len(chunks),
+                            "sent": [{"message": "Message sent via clipboard fallback"}],
+                            "verify_found": None,
+                            "fallback": "clipboard",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return 0
 
             sent = []
             for index, chunk in enumerate(chunks, start=1):
