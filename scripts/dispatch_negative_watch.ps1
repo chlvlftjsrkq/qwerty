@@ -15,7 +15,11 @@ param(
     [string]$DiagnosticChatroom = "",
     [string]$DryRun = "false",
     [string]$SendDiagnostic = "false",
-    [string]$TriggerSource = "pc-negative-watch-main"
+    [string]$TriggerSource = "pc-negative-watch-main",
+    [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
+    [string]$McpCommand = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Scripts\kakaotalk-mcp.exe",
+    [string]$CodexCommand = "C:\Users\April\AppData\Roaming\npm\codex.cmd",
+    [string]$FallbackToLocal = "true"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,9 +38,26 @@ function Convert-ToWorkflowBool {
     return "false"
 }
 
+function Convert-ToBool {
+    param([string]$Value)
+    $normalized = "$Value".Trim().ToLowerInvariant()
+    return $normalized -in @("1", "true", "yes", "y", "on")
+}
+
+function Write-DispatchLog {
+    param(
+        [string]$LogPath,
+        [hashtable]$LogObject
+    )
+    Add-Content -LiteralPath $LogPath -Value ($LogObject | ConvertTo-Json -Compress) -Encoding UTF8
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if (!(Test-Path -LiteralPath $GhExe)) {
     throw "GitHub CLI was not found: $GhExe"
+}
+if (!(Test-Path -LiteralPath $PythonExe)) {
+    throw "Python executable was not found: $PythonExe"
 }
 if ([string]::IsNullOrWhiteSpace($TargetChatroom)) {
     $TargetChatroom = Get-DefaultTargetChatroom
@@ -67,7 +88,92 @@ Set-Location $Root
 Write-Host "Dispatching $Workflow for room '$TargetChatroom' in $Repo..."
 & $GhExe @argsList
 if ($LASTEXITCODE -ne 0) {
-    throw "gh workflow run failed with exit code $LASTEXITCODE"
+    $ghExitCode = $LASTEXITCODE
+    $stateDir = Join-Path $Root ".scheduler"
+    New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    $logPath = Join-Path $stateDir "negative-watch-dispatch-log.jsonl"
+    Write-DispatchLog -LogPath $logPath -LogObject ([ordered]@{
+        dispatched_at = (Get-Date).ToString("o")
+        target_chatroom = $TargetChatroom
+        max_alerts = $MaxAlerts
+        lookback_hours = $LookbackHours
+        topic_ttl_hours = $TopicTtlHours
+        related_hours = $RelatedHours
+        related_limit = $RelatedLimit
+        active_start_hour = $ActiveStartHour
+        active_end_hour = $ActiveEndHour
+        state_key = $StateKey
+        diagnostic_chatroom = $DiagnosticChatroom
+        dry_run = (Convert-ToWorkflowBool $DryRun)
+        send_diagnostic_report = (Convert-ToWorkflowBool $SendDiagnostic)
+        trigger_source = $TriggerSource
+        workflow = $Workflow
+        repo = $Repo
+        dispatch_failed = $true
+        dispatch_exit_code = $ghExitCode
+        fallback_to_local = (Convert-ToWorkflowBool $FallbackToLocal)
+    })
+
+    if (-not (Convert-ToBool $FallbackToLocal)) {
+        throw "gh workflow run failed with exit code $ghExitCode"
+    }
+
+    Write-Host "gh workflow run failed with exit code $ghExitCode. Running local negative watch fallback..."
+    $watchScript = Join-Path $Root "scripts\watch_negative_news.py"
+    if (!(Test-Path -LiteralPath $watchScript)) {
+        throw "Local fallback script was not found: $watchScript"
+    }
+
+    $statePath = Join-Path $stateDir "negative-news-watch-$StateKey-seen.json"
+    $outputDir = Join-Path $Root "runs\negative-watch-$StateKey"
+    $localArgs = @(
+        $watchScript,
+        "--room", $TargetChatroom,
+        "--state", $statePath,
+        "--output-dir", $outputDir,
+        "--generate-alert-image",
+        "--max-alerts", "$MaxAlerts",
+        "--lookback-hours", "$LookbackHours",
+        "--topic-ttl-hours", "$TopicTtlHours",
+        "--related-hours", "$RelatedHours",
+        "--related-limit", "$RelatedLimit",
+        "--active-start-hour", "$ActiveStartHour",
+        "--active-end-hour", "$ActiveEndHour"
+    )
+    if (Test-Path -LiteralPath $McpCommand) {
+        $localArgs += @("--mcp-command", $McpCommand)
+    }
+    if (Test-Path -LiteralPath $CodexCommand) {
+        $localArgs += @("--codex-command", $CodexCommand)
+    }
+    if (![string]::IsNullOrWhiteSpace($DiagnosticChatroom)) {
+        $localArgs += @("--diagnostic-room", $DiagnosticChatroom)
+    }
+    if (Convert-ToBool $DryRun) {
+        $localArgs += "--dry-run"
+    }
+    if (Convert-ToBool $SendDiagnostic) {
+        $localArgs += "--send-diagnostic-report"
+    }
+
+    & $PythonExe @localArgs
+    $fallbackExitCode = $LASTEXITCODE
+    Write-DispatchLog -LogPath $logPath -LogObject ([ordered]@{
+        dispatched_at = (Get-Date).ToString("o")
+        target_chatroom = $TargetChatroom
+        state_key = $StateKey
+        diagnostic_chatroom = $DiagnosticChatroom
+        trigger_source = $TriggerSource
+        workflow = $Workflow
+        repo = $Repo
+        local_fallback = $true
+        local_fallback_exit_code = $fallbackExitCode
+    })
+    if ($fallbackExitCode -ne 0) {
+        throw "local negative watch fallback failed with exit code $fallbackExitCode"
+    }
+    Write-Host "Local negative watch fallback completed successfully."
+    exit 0
 }
 
 $stateDir = Join-Path $Root ".scheduler"
@@ -90,7 +196,8 @@ $logObject = [ordered]@{
     trigger_source = $TriggerSource
     workflow = $Workflow
     repo = $Repo
+    dispatch_failed = $false
 }
-Add-Content -LiteralPath $logPath -Value ($logObject | ConvertTo-Json -Compress) -Encoding UTF8
+Write-DispatchLog -LogPath $logPath -LogObject $logObject
 
 Write-Host "Dispatch requested successfully: room=$TargetChatroom, source=$TriggerSource"
