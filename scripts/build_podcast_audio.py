@@ -355,13 +355,15 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
         number = article["number"]
         title = trim_text(article["title"], 110)
         sentences = split_sentences(article["body"])
-        body = " ".join(sentences[:2]) if sentences else article["body"]
-        body = trim_text(body, 260)
+        body = " ".join(sentences[:3]) if sentences else article["body"]
+        body = trim_text(body, 420)
         if not title or not body:
             continue
+        title_context = polish_korean_text(f"{title} 관련 보도입니다.")
+        body_context = polish_korean_text(body)
         candidate = (
             f"{NUMBER_WORDS.get(number, number + '번째')} 소식입니다. "
-            f"{spoken_title(title)} {polish_korean_text(body)}"
+            f"{title_context} {body_context}"
         )
         projected = len("\n".join([*lines, candidate]))
         if lines and projected > max_chars:

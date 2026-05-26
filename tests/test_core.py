@@ -396,7 +396,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("2026 년 5 월 16 일 기관 뉴스 음성 브리핑입니다.", speech)
         self.assertIn("오늘은 주요 기사 1 건을 제목과 핵심 내용 중심으로 전해드리겠습니다.", speech)
         self.assertIn(
-            "첫 번째 소식입니다. 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사.",
+            "첫 번째 소식입니다. 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사 관련 보도입니다.",
             speech,
         )
         self.assertIn("병무청이 공공데이터 행사를 열었습니다.", speech)
