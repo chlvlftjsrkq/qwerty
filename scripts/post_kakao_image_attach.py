@@ -69,6 +69,15 @@ def bring_room_to_front(
         open_result = controller.search_and_open_room(room)
         time.sleep(wait)
         hwnd = controller.find_chat_window(room)
+        if not hwnd:
+            pyautogui.hotkey("ctrl", "f")
+            time.sleep(0.5)
+            pyperclip.copy(room)
+            pyautogui.hotkey("ctrl", "v")
+            time.sleep(0.5)
+            pyautogui.press("enter")
+            time.sleep(wait)
+            hwnd = controller.find_chat_window(room)
         if hwnd:
             break
         print(
