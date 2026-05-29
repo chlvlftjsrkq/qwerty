@@ -299,6 +299,25 @@ class CoreTests(unittest.TestCase):
         self.assertLessEqual(len(fitted), 1200)
         self.assertNotIn("Opinion:", fitted)
 
+    def test_default_summary_fit_keeps_source_links_for_kakao_split(self):
+        summary = "\n".join(
+            ["🪖 2026-05-28 병무청 뉴스 브리핑"]
+            + [
+                "\n".join(
+                    [
+                        f"{idx}. 병무청 기사 {idx}",
+                        "병무청 관련 설명입니다. " * 8,
+                        f"Source: https://example.com/{idx}",
+                    ]
+                )
+                for idx in range(1, 11)
+            ]
+        )
+        fitted = _fit_summary_for_kakao(summary)
+
+        self.assertIn("Source: https://example.com/1", fitted)
+        self.assertIn("Source: https://example.com/10", fitted)
+
     def test_article_topic_key_for_known_duplicates(self):
         self.assertEqual(
             _article_topic_key("대경 병무청, 8월 입영 현역병 모집 접수", "현역병 모집 안내"),

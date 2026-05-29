@@ -17,7 +17,7 @@ from .weather import build_weather_summary
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 CODEX_INPUT_ARTICLE_LIMIT = 200
 SUMMARY_ITEM_LIMIT = 10
-KAKAO_MESSAGE_SOFT_LIMIT = 2900
+KAKAO_MESSAGE_SOFT_LIMIT = 9000
 
 
 def summary_date_label(target_date: date, start_date: date | None = None) -> str:
@@ -348,10 +348,6 @@ def _fit_summary_for_kakao(summary: str, max_chars: int = KAKAO_MESSAGE_SOFT_LIM
         return compact
 
     compact = _source_url_only(compact)
-    if len(compact) <= max_chars:
-        return compact
-
-    compact = _without_lines_starting(compact, ("Source:",))
     if len(compact) <= max_chars:
         return compact
 
