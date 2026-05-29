@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -829,8 +830,9 @@ def build_summary(
         try:
             return _with_weather(config, summarize_with_codex(config, target_date, articles, start_date=start_date))
         except Exception as exc:
+            print(f"요약 모델 호출 실패, 휴리스틱 요약으로 대체합니다: {exc}", file=sys.stderr)
             fallback = summarize_heuristic(config, target_date, articles, start_date=start_date)
-            return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
+            return _with_weather(config, fallback)
     if provider == "openai":
         return _with_weather(config, summarize_with_openai(config, target_date, articles, start_date=start_date))
     if provider in {"heuristic", "none", "fallback"}:
@@ -841,6 +843,7 @@ def build_summary(
         try:
             return _with_weather(config, summarize_with_openai(config, target_date, articles, start_date=start_date))
         except Exception as exc:
+            print(f"요약 모델 호출 실패, 휴리스틱 요약으로 대체합니다: {exc}", file=sys.stderr)
             fallback = summarize_heuristic(config, target_date, articles, start_date=start_date)
-            return _with_weather(config, f"{fallback}\n\n요약 모델 호출 실패: {exc}")
+            return _with_weather(config, fallback)
     return _with_weather(config, summarize_heuristic(config, target_date, articles, start_date=start_date))

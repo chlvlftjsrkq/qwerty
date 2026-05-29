@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 
 URL_RE = re.compile(r"https?://[^\s)>\]]+")
+NUMBERED_TITLE_RE = re.compile(r"^(?:[1-9]️⃣|🔟|\d+[.)])\s+(.+?)\s*$")
 
 
 def canonical_url(url: str) -> str:
@@ -38,6 +39,29 @@ def extract_source_urls(summary_text: str) -> list[str]:
     return urls
 
 
+def normalize_title(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def title_lookup_key(value: str) -> str:
+    normalized = normalize_title(value).casefold()
+    return re.sub(r"[\s\"'“”‘’.,·…\-\[\]()（）{}<>:;!?]", "", normalized)
+
+
+def extract_numbered_titles(summary_text: str) -> list[str]:
+    titles: list[str] = []
+    seen: set[str] = set()
+    for line in summary_text.splitlines():
+        match = NUMBERED_TITLE_RE.match(line.strip())
+        if not match:
+            continue
+        title = normalize_title(match.group(1))
+        if title and title not in seen:
+            seen.add(title)
+            titles.append(title)
+    return titles
+
+
 def filter_articles_by_source_urls(articles: list[dict[str, Any]], source_urls: list[str]) -> list[dict[str, Any]]:
     if not source_urls:
         return []
@@ -51,6 +75,30 @@ def filter_articles_by_source_urls(articles: list[dict[str, Any]], source_urls: 
     selected: list[dict[str, Any]] = []
     for source_url in source_urls:
         article = by_url.get(source_url)
+        if article is not None:
+            selected.append(article)
+    return selected
+
+
+def filter_articles_by_titles(articles: list[dict[str, Any]], titles: list[str]) -> list[dict[str, Any]]:
+    if not titles:
+        return []
+
+    by_title: dict[str, dict[str, Any]] = {}
+    by_key: dict[str, dict[str, Any]] = {}
+    for article in articles:
+        title = normalize_title(str(article.get("title") or ""))
+        if title and title not in by_title:
+            by_title[title] = article
+        key = title_lookup_key(title)
+        if key and key not in by_key:
+            by_key[key] = article
+
+    selected: list[dict[str, Any]] = []
+    for title in titles:
+        article = by_title.get(title)
+        if article is None:
+            article = by_key.get(title_lookup_key(title))
         if article is not None:
             selected.append(article)
     return selected
@@ -74,8 +122,14 @@ def main() -> int:
     if not isinstance(articles, list):
         raise RuntimeError(f"Article JSON must contain a list: {articles_path}")
 
-    source_urls = extract_source_urls(summary_path.read_text(encoding="utf-8"))
+    summary_text = summary_path.read_text(encoding="utf-8")
+    source_urls = extract_source_urls(summary_text)
     selected = filter_articles_by_source_urls(articles, source_urls)
+    title_matches = 0
+    if not selected:
+        numbered_titles = extract_numbered_titles(summary_text)
+        selected = filter_articles_by_titles(articles, numbered_titles)
+        title_matches = len(numbered_titles)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(selected, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -83,6 +137,7 @@ def main() -> int:
         json.dumps(
             {
                 "summary_sources": len(source_urls),
+                "summary_titles": title_matches,
                 "selected_articles": len(selected),
                 "output": str(output_path),
             },

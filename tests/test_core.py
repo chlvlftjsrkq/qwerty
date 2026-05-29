@@ -13,7 +13,12 @@ from kakao_mma_news.news import (
     matches_required_terms,
     strip_html,
 )
-from scripts.filter_articles_by_summary_sources import extract_source_urls, filter_articles_by_source_urls
+from scripts.filter_articles_by_summary_sources import (
+    extract_numbered_titles,
+    extract_source_urls,
+    filter_articles_by_source_urls,
+    filter_articles_by_titles,
+)
 from kakao_mma_news.summarize import (
     _load_json_object,
     _article_topic_key,
@@ -68,6 +73,30 @@ class CoreTests(unittest.TestCase):
         selected = filter_articles_by_source_urls(articles, source_urls)
 
         self.assertEqual([item["title"] for item in selected], ["first", "second"])
+
+    def test_filter_articles_by_numbered_titles_when_sources_are_trimmed(self):
+        articles = [
+            {"title": "제외 기사", "url": "https://example.com/excluded", "source": "example.com"},
+            {"title": "예비군 훈련 현장 점검", "url": "https://example.com/one", "source": "example.com"},
+            {"title": "박근혜 “보수결집의 시간”… 국민의힘, 정권심판론 강조", "url": "https://example.com/two", "source": "example.com"},
+        ]
+        summary = "\n".join(
+            [
+                "🪖 2026-05-28 병무청 뉴스 브리핑",
+                "1️⃣ 예비군 훈련 현장 점검",
+                "요약입니다.",
+                "2️⃣ 박근혜 “보수결집의 시간” 국민의힘, 정권심판론 강조",
+                "요약입니다.",
+            ]
+        )
+
+        titles = extract_numbered_titles(summary)
+        selected = filter_articles_by_titles(articles, titles)
+
+        self.assertEqual(
+            [item["url"] for item in selected],
+            ["https://example.com/one", "https://example.com/two"],
+        )
 
     def test_strip_html(self):
         self.assertEqual(strip_html("<b>병무청</b>&nbsp;뉴스<br>요약"), "병무청 뉴스 요약")
