@@ -307,7 +307,9 @@ jobs:
           if ($env:TARGET_START_DATE_RESOLVED -eq $env:TARGET_DATE_RESOLVED) {
             $dateLabel = Format-KoreanDateLabel $env:TARGET_DATE_RESOLVED
           } else {
-            $dateLabel = "$(Format-KoreanDateLabel $env:TARGET_START_DATE_RESOLVED)부터 $(Format-KoreanDateLabel $env:TARGET_DATE_RESOLVED)까지"
+            $fromSuffix = "$([char]0xBD80)$([char]0xD130)"
+            $toSuffix = "$([char]0xAE4C)$([char]0xC9C0)"
+            $dateLabel = "$(Format-KoreanDateLabel $env:TARGET_START_DATE_RESOLVED)$fromSuffix $(Format-KoreanDateLabel $env:TARGET_DATE_RESOLVED)$toSuffix"
           }
           $labelSuffix = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("64m07IqkIEFJIOydjOyEseyalOyVvSDrk6PquLA="))
           $label = [char]::ConvertFromUtf32(0x1F3A7) + $dateLabel + " " + $env:AGENCY_NAME + " " + $labelSuffix
