@@ -432,9 +432,12 @@ class CoreTests(unittest.TestCase):
             "🌤️ 오늘 서울은 맑고 최고 25도입니다.\n"
             "# 1️⃣ 병무청 AI·5G 공공데이터 2026-05-16 기사\n"
             "병무청이 공공데이터 행사를 열었다. AI 활용 계획은 5건이다. 🎯\n"
+            "관련 보도: 3건 추가 묶음\n"
             "Opinion: 공식 안내 확인이 필요하다.\n"
             "Source: example.com / https://example.com/news\n"
             "---\n"
+            "같은 이슈를 다룬 관련 보도 2건은 대표 기사에 묶었습니다.\n"
+            "그 외 관련 기사 5건은 관련도 기준으로 제외했습니다.\n"
             "오늘 한 줄 요약 🎯\n"
             "이 문장은 음성 기사 내용에 들어가면 안 된다.\n",
             "2026-05-16",
@@ -455,6 +458,9 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("들어가면 안 된다", speech)
         self.assertNotIn("Source:", speech)
         self.assertNotIn("️⃣", speech)
+        self.assertNotIn("추가 묶음", speech)
+        self.assertNotIn("대표 기사에 묶었습니다", speech)
+        self.assertNotIn("관련도 기준으로 제외", speech)
         self.assertNotIn("...", speech)
         self.assertNotIn("…", speech)
 

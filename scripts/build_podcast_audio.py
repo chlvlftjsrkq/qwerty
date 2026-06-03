@@ -298,6 +298,15 @@ def extract_agency_name(summary: str) -> str:
     return "기관"
 
 
+def is_briefing_meta_line(line: str) -> bool:
+    return (
+        line.startswith("관련 보도:")
+        or line.startswith("같은 이슈")
+        or line.startswith("그 외 관련 기사")
+        or line.startswith("요약이 길어")
+    )
+
+
 def extract_articles(summary: str) -> list[dict[str, str]]:
     articles: list[dict[str, str]] = []
     current: dict[str, Any] | None = None
@@ -332,6 +341,8 @@ def extract_articles(summary: str) -> list[dict[str, str]]:
         if line.startswith("Opinion:"):
             continue
         if line.startswith("#"):
+            continue
+        if is_briefing_meta_line(line):
             continue
 
         cleaned = clean_for_speech(line)
