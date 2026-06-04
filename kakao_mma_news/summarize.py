@@ -632,6 +632,9 @@ def summarize_with_codex(
             "Return exactly 10 briefing items when there are at least 10 distinct relevant topics or article groups.",
             "If fewer than 10 distinct relevant topics exist, return all relevant topics. Do not stop at 5 items when additional direct policy, official activity, recruitment, benefits, military-service system, or local office articles are present.",
             "For 병무청 briefings, balance the final selection: major public or legal military-service issues, direct 병무청 policy or official activity, and meaningful 지방병무청/local office news should all be considered when present.",
+            "Duplicate and near-duplicate topic checking is mandatory. You must compare every candidate article against already selected topics by event, institution, person, program, benefit, partnership, MOU, and policy substance.",
+            "This duplicate-topic judgment must be done semantically by you, not by exact title matching. If several outlets report the same partnership, agreement, benefit, recruitment, incident, lawsuit, celebrity issue, or policy announcement, output only one representative item.",
+            "Never output two items about the same partnership, agreement, MOU, benefit program, incident, or public figure issue even if titles, media outlets, dates, wording, photos, or article angles differ.",
             "Do not let many articles about one celebrity or one event fill the whole briefing. Pick one representative item for the same person or event and set related_count to the number of additional related articles.",
             "When several articles cover the same person or same event, keep the strongest representative article and treat the rest as related coverage instead of repeating the same issue.",
             f"For opinion, write only a cautious {policy_perspective} 관점의 확인 포인트.",
@@ -826,9 +829,11 @@ def build_summary(
         try:
             return _with_weather(config, summarize_with_codex(config, target_date, articles, start_date=start_date))
         except Exception as exc:
-            print(f"요약 모델 호출 실패, 휴리스틱 요약으로 대체합니다: {exc}", file=sys.stderr)
-            fallback = summarize_heuristic(config, target_date, articles, start_date=start_date)
-            return _with_weather(config, fallback)
+            print(f"요약 모델 호출 실패, 카카오 브리핑 생성을 중단합니다: {exc}", file=sys.stderr)
+            raise RuntimeError(
+                "SUMMARY_PROVIDER=codex에서는 Codex CLI의 의미 기반 중복 판단이 필수이므로 "
+                "휴리스틱 요약으로 대체하지 않습니다."
+            ) from exc
     if provider == "openai":
         return _with_weather(config, summarize_with_openai(config, target_date, articles, start_date=start_date))
     if provider in {"heuristic", "none", "fallback"}:

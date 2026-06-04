@@ -280,6 +280,25 @@ class CoreTests(unittest.TestCase):
         self.assertIn("🔟 삼성전자 주요 기사 10", summary)
         self.assertNotIn("삼성전자 주요 기사 11", summary)
 
+    def test_codex_provider_does_not_fallback_without_ai_duplicate_check(self):
+        article = Article(
+            "부영그룹 병무청 협약",
+            "https://example.com/booyoung",
+            "example.com",
+            datetime(2026, 6, 3, tzinfo=timezone.utc),
+            "부영그룹과 병무청이 병역명문가 레저시설 우대 협약을 맺었습니다.",
+            "test",
+        )
+        config = SimpleNamespace(summary_provider="codex")
+
+        with patch("kakao_mma_news.summarize.summarize_with_codex", side_effect=RuntimeError("timeout")):
+            with self.assertRaises(RuntimeError) as raised:
+                from kakao_mma_news.summarize import build_summary
+
+                build_summary(config, article.published_date_kst, [article])
+
+        self.assertIn("Codex CLI의 의미 기반 중복 판단이 필수", str(raised.exception))
+
     def test_summary_fit_drops_opinion_first(self):
         long_summary = "\n".join(
             ["🪖 2026-05-17 삼성전자 뉴스 브리핑"]
