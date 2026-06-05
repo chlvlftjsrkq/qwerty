@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>병무청 뉴스 음성 브리핑</title>
+  <title>AI 병무청 데일리 모닝톡</title>
   <style>
     :root {
       color-scheme: dark;
@@ -156,7 +156,7 @@
 <body>
   <div class="app">
     <header>
-      <h1>병무청 뉴스 음성 브리핑</h1>
+      <h1>AI 병무청 데일리 모닝톡</h1>
     </header>
 
     <main>
@@ -164,7 +164,7 @@
         <div id="disc" class="disc" aria-hidden="true"></div>
         <div class="title">
           <h2 id="episodeTitle">불러오는 중</h2>
-          <p id="episodeDescription">네이버 뉴스 기준 병무청 관련 음성 요약</p>
+          <p id="episodeDescription">네이버 뉴스 기준 병무청 AI 음성요약</p>
         </div>
         <div class="controls">
           <button id="prev" type="button" aria-label="이전 에피소드">◀◀</button>
@@ -227,7 +227,7 @@
       state.index = Math.max(0, Math.min(index, state.episodes.length - 1));
       const episode = state.episodes[state.index];
       title.textContent = episode.title || `${episode.date} 기관 뉴스 브리핑`;
-      description.textContent = episode.description || "네이버 뉴스 기준 기관별 음성 요약";
+      description.textContent = episode.description || "네이버 뉴스 기준 병무청 AI 음성요약";
       const audioUrl = versionedAsset(episode.audio, episode);
       audio.pause();
       audio.src = audioUrl;

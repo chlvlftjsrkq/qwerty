@@ -1,126 +1,75 @@
-# 병무청 뉴스 카카오톡 단톡방 자동 게시
+# AI 병무청 데일리 모닝톡
 
-매일 KST 기준 전날의 병무청 관련 보도자료/언론기사를 수집해 요약하고, 로그인된 Windows PC 카카오톡 단톡방에 붙여넣어 전송하는 도구입니다.
+[한국어](#한국어) | [English](#English) | [음성요약 플레이어](https://chlvlftjsrkq.github.io/qwerty/podcast/)
 
-## 구조
+<a id="한국어"></a>
+## 한국어
 
-- 뉴스 수집: 기본은 k-skill `naver-news-search` 프록시 기반 네이버 뉴스 검색, 선택적으로 정책브리핑 RSS/Google News RSS/네이버 공식 API 직접 호출
-- 요약: self-hosted 실행에서는 로그인된 Codex CLI를 LLM으로 사용, GitHub-hosted 요약 전용 workflow는 `OPENAI_API_KEY`가 있으면 OpenAI API를 쓰고 없으면 제목/요약 기반 간단 요약
-- 날씨: 요약 첫머리에 선택 기관 지역의 오늘 날씨와 미세먼지 요약을 붙입니다.
-- 게시: Windows PC 카카오톡 GUI를 `pyautogui`로 제어
-- GitHub Actions: 수집/요약은 가능하지만, 단톡방 게시는 카카오톡이 로그인된 Windows PC 또는 self-hosted runner에서만 가능
-- 음성 요약: `edge-tts`로 MP3를 만들고 `podcast/` 정적 플레이어에서 재생
+AI 병무청 데일리 모닝톡은 병무청 관련 뉴스를 매일 수집해 핵심 브리핑, 기사 이미지 모음, 음성요약 링크를 카카오톡 단체방으로 자동 발송하는 프로젝트입니다.
 
-## 설치
+이 프로젝트는 출근 전 짧은 시간에 병무청 관련 주요 이슈를 빠르게 확인할 수 있도록 만들어졌습니다. 네이버 뉴스 기준으로 전날 기사와 주말·공휴일 누적 기사를 확인하고, 병역 제도, 예비군, 사회복무요원, 병역기피 이슈, 지방병무청 소식 등을 중요도와 중복 여부를 고려해 정리합니다.
 
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python -m pip install --upgrade pip
-.\.venv\Scripts\python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-notepad .env
-```
+### 주요 기능
 
-`.env`에서 최소한 `TARGET_CHATROOM`을 실제 단톡방 이름으로 바꾸세요. 처음에는 `KAKAO_ENABLED=false`를 유지하고 dry run부터 확인하는 편이 좋습니다.
+- 병무청 관련 뉴스 자동 수집 및 AI 요약
+- Google Gemini를 우선 활용하고, Codex는 보조 검토 도구로 함께 활용
+- 대전과 인천 날씨를 포함한 아침 브리핑 생성
+- 기사 대표 이미지를 모은 브리핑 이미지 생성
+- 음성요약 MP3와 GitHub Pages 기반 재생 플레이어 제공
+- 카카오톡 단체방으로 브리핑, 이미지, 음성요약 링크 자동 발송
+- 부정 이슈 탐지와 중복 이슈 판단을 통해 반복 알림 최소화
+- GitHub Actions와 Windows 작업 스케줄러를 함께 사용하는 완전 자동화 운영
 
-## 테스트 실행
+### 공개 결과물
 
-```powershell
-.\.venv\Scripts\python -m kakao_mma_news --dry-run
-```
+- [음성요약 플레이어](https://chlvlftjsrkq.github.io/qwerty/podcast/)
+- `summaries/`에 보관되는 일자별 브리핑 Markdown
+- `podcast/`에 보관되는 음성요약 파일과 재생용 manifest
 
-특정 날짜를 확인하려면:
+### 운영 방식
 
-```powershell
-.\.venv\Scripts\python -m kakao_mma_news --date 2026-05-15 --dry-run
-```
+아침 브리핑은 카카오톡이 로그인된 Windows PC에서 GitHub Actions workflow를 호출하는 방식으로 실행됩니다. GitHub Actions는 뉴스 수집, AI 요약, 이미지 생성, 음성요약 생성, 결과 보관을 수행하고, self-hosted Windows runner가 PC 카카오톡을 통해 메시지를 전송합니다.
 
-결과는 `runs/summary-YYYY-MM-DD.md`와 `runs/articles-YYYY-MM-DD.json`에 저장됩니다.
+주말과 공휴일에는 정규 아침 브리핑을 쉬고, 다음 영업일에 누적 기사를 종합해 보낼 수 있도록 구성되어 있습니다. 병무청 부정 이슈 모니터링은 별도 workflow로 운영하며, 실제 알림 이력과 최근 기사 내용을 비교해 중복 알림을 줄입니다.
 
-Codex CLI로 요약을 테스트하려면 Codex 앱/CLI 로그인이 되어 있는 Windows 사용자 세션에서 실행하세요.
+### 공개 저장소 안내
 
-```powershell
-$env:SUMMARY_PROVIDER="codex"
-$env:CODEX_COMMAND="C:\Users\April\AppData\Roaming\npm\codex.cmd"
-.\.venv\Scripts\python -m kakao_mma_news --date 2026-05-15 --dry-run
-```
+이 저장소는 GitHub Pages와 요약 결과물을 공개하기 위해 공개 상태로 운영됩니다. 공개 저장소 특성상 저장소 안의 소스 파일 자체를 완전히 숨길 수는 없습니다. 다만 첫 화면은 결과물과 서비스 설명 중심으로 정리했고, API 키와 인증 정보는 저장소에 포함하지 않습니다.
 
-## PC 카카오톡 게시
+소스코드 비공개가 꼭 필요하면 자동화 코드는 private 저장소로 분리하고, `summaries/`와 `podcast/` 같은 공개 결과물만 별도 public Pages 저장소로 배포하는 구조가 가장 안전합니다.
 
-PC 카카오톡이 로그인되어 있고, 잠금 화면이 아니며, 단톡방 이름이 검색 가능해야 합니다.
+<a id="English"></a>
+## English
 
-```powershell
-.\.venv\Scripts\python -m kakao_mma_news --post
-```
+AI MMA Daily Morning Talk is an automated KakaoTalk briefing project for Military Manpower Administration news in Korea. It collects relevant news, creates a concise morning briefing, builds a combined article image sheet, generates an audio summary, and sends the results to a KakaoTalk group chat.
 
-기본 동작은 카카오톡 창 포커스, `Ctrl+F`, 단톡방 이름 붙여넣기, Enter, 메시지 붙여넣기, Enter입니다. 환경에 따라 검색 단축키가 다르면 `.env`의 `KAKAO_SEARCH_HOTKEY`를 수정하거나 `KAKAO_SEARCH_CLICK_X/Y`, `KAKAO_MESSAGE_CLICK_X/Y` 좌표를 지정하세요.
+The project is designed for quick morning review before work. It monitors Naver News for the previous business day, plus accumulated weekend or holiday coverage when needed, and organizes news about military service policy, reserve forces, social service personnel, evasion issues, and regional MMA offices.
 
-## 음성 요약 플레이어
+### Highlights
 
-요약 Markdown을 음성 브리핑 MP3로 변환하려면:
+- Automated news collection and AI briefing for MMA-related topics
+- Google Gemini is used first, with Codex used as an auxiliary review tool
+- Morning weather summary for Daejeon and Incheon
+- Combined article image sheet for visual scanning
+- Audio summary MP3 with a GitHub Pages podcast player
+- Automated KakaoTalk delivery for briefing text, images, and audio links
+- Negative issue monitoring with duplicate issue suppression
+- Fully automated operation using GitHub Actions and Windows Task Scheduler
 
-```powershell
-.\.venv\Scripts\python scripts\build_podcast_audio.py --date 2026-05-16 --summary runs\summary-2026-05-16.md --site-base-url "https://YOUR_GITHUB_USER.github.io/YOUR_REPO/podcast/" --target-minutes 5
-```
+### Public Outputs
 
-생성 결과는 `podcast/audio/YYYY-MM-DD.mp3`, `podcast/scripts/YYYY-MM-DD.txt`, `podcast/manifest.json`에 저장됩니다. 음성 스크립트는 인사말 뒤 기사 제목과 주요 내용 1~2문장만 읽도록 압축하며, 기본 목표 길이는 5분 상한입니다. 기본적으로 음성요약에는 날씨를 넣지 않습니다. `podcast/index.html`은 GitHub Pages에서 `manifest.json`을 읽어 최신 음성 요약을 재생합니다.
-요약문과 음성 스크립트는 줄임표를 쓰지 않고 경어체 종결형으로 정리합니다.
+- [Audio summary player](https://chlvlftjsrkq.github.io/qwerty/podcast/)
+- Daily briefing Markdown files archived under `summaries/`
+- Podcast audio files and playback manifest under `podcast/`
 
-## 매일 자동 실행
+### How It Runs
 
-Windows 작업 스케줄러에 등록:
+The morning briefing is triggered from a Windows PC where KakaoTalk is already logged in. The PC dispatches a GitHub Actions workflow, and the self-hosted Windows runner handles news collection, AI summarization, image generation, audio generation, archival, and KakaoTalk delivery.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\register_task.ps1 -Time 08:00
-```
+Regular morning briefings can pause on weekends and Korean holidays, then summarize accumulated coverage on the next business day. Negative issue monitoring runs as a separate workflow and compares recent alert history with newly collected news to reduce repeated alerts.
 
-GUI 자동화라서 사용자가 로그인된 세션에서 실행되어야 합니다. PC가 잠겨 있거나 절전 상태면 전송이 실패할 수 있습니다.
+### Public Repository Note
 
-## GitHub Actions
+This repository is public because GitHub Pages and public briefing artifacts are published from it. A public GitHub repository cannot fully hide its source files. This landing page therefore focuses on the public-facing results and service overview, while secrets and credentials are never stored in the repository.
 
-기본 요약 전용 workflow는 GitHub-hosted Windows runner에서 Markdown 요약 파일만 만듭니다. GitHub-hosted runner에는 사용자의 PC 카카오톡이 없고 Codex CLI 로그인 상태도 유지되지 않으므로, 단톡방 게시나 Codex CLI 기반 요약에는 적합하지 않습니다.
-
-단톡방 게시까지 Actions로 하려면 Windows PC에 GitHub self-hosted runner를 설치하고, PC 카카오톡을 로그인 상태로 켜 둔 뒤 `.github/workflows/daily-post-mcp-self-hosted.yml`을 사용하세요. 이 workflow는 `workflow_dispatch`로 호출되며, Codex CLI로 네이버 뉴스 요약을 생성하고, `kronenz/kakaotalk-mcp`를 설치한 뒤 `scripts/post_summary_mcp.py`로 `runs/summary-YYYY-MM-DD-기관명.md`를 채팅방에 전송합니다.
-
-GitHub native cron이 누락될 수 있으므로, 현재 운영 방식은 카카오톡이 켜져 있는 PC의 Windows 작업 스케줄러가 GitHub Actions를 호출하는 구조입니다. 5분 단위 기관별 테스트 등록:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\register_agency_dispatch_task.ps1 -IntervalMinutes 5 -StartNow
-```
-
-이 작업은 `scripts/dispatch_agency_workflow.ps1`을 5분마다 실행하고, `config/agency_schedule.json`의 기관 목록을 순서대로 하나씩 선택해 `daily-post-mcp-self-hosted.yml`을 `workflow_dispatch`로 호출합니다.
-
-GitHub 저장소 설정에서 아래 값을 준비하세요.
-
-- Repository variable `TARGET_CHATROOM`: 카카오톡 채팅방 이름
-- Repository variable `SUMMARY_PROVIDER`: 선택, self-hosted 게시 workflow 기본값은 `codex`
-- Repository variable `CODEX_COMMAND`: 선택, 기본값은 `C:\Users\April\AppData\Roaming\npm\codex.cmd`
-- Repository variable `CODEX_TIMEOUT_SECONDS`: 선택, 기본값은 `300`
-- Repository variable `WEATHER_ENABLED`: 선택, workflow dispatch 입력값이 우선합니다.
-- Repository variable `PODCAST_BASE_URL`: 선택, 기본값은 `https://<owner>.github.io/<repo>/podcast/`
-- Repository variable `PODCAST_LISTEN_URL_TEMPLATE`: 선택, private repo처럼 Pages를 못 쓰면 `https://github.com/<owner>/<repo>/blob/main/podcast/audio/{date}.mp3`
-- Repository variable `TTS_VOICE`: 선택, 기본값은 `ko-KR-SunHiNeural`
-- Repository variable `TTS_TARGET_MINUTES`: 선택, 기본값은 `5`
-- Repository variable `KSKILL_PROXY_BASE_URL`: 선택, 기본값은 `https://k-skill-proxy.nomadamas.org`
-- Secret `OPENAI_API_KEY`: 선택, `SUMMARY_PROVIDER=auto` 또는 `openai`일 때 사용합니다.
-
-요약 영구 보관:
-
-- Actions가 만든 `runs/summary-YYYY-MM-DD-기관명.md`는 실행 artifact로도 올라가고, 동시에 `summaries/summary-YYYY-MM-DD-기관명.md`로 복사되어 GitHub repo에 자동 커밋됩니다.
-- 음성 요약은 `podcast/audio/YYYY-MM-DD-기관명.mp3`와 `podcast/scripts/YYYY-MM-DD-기관명.txt`로 저장되고, `podcast/manifest.json`이 함께 자동 커밋됩니다.
-- `runs/` artifact는 실행 기록용 임시 보관이고, `summaries/` 폴더가 장기 보관용 원본입니다.
-- 같은 날짜 요약이 이미 있고 내용이 같으면 새 커밋을 만들지 않습니다.
-
-주의: self-hosted runner가 Windows 서비스로 실행되면 GUI 카카오톡 창을 제어하지 못할 수 있습니다. 카카오톡이 열린 사용자 세션에서 runner를 실행해야 합니다.
-
-## 뉴스 수집 설정
-
-기본값은 `NAVER_NEWS_ENABLED=true`, `GOOGLE_NEWS_ENABLED=false`, `POLICY_RSS_ENABLED=false`입니다. 네이버 개발자 센터 키가 없으면 `KSKILL_PROXY_BASE_URL`의 k-skill 프록시를 사용하고, `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`이 있으면 공식 네이버 Open API를 직접 호출합니다.
-
-`NEWS_QUERY_TERMS`는 네이버 뉴스 검색에 넣을 넓은 검색어 목록이고, `NEWS_REQUIRED_TERMS`는 결과에서 반드시 포함되어야 하는 필터입니다. 기본값은 `NEWS_REQUIRED_TERMS=병무청`이라 선거 후보 병역사항처럼 병무청 직접 관련성이 낮은 기사를 줄입니다.
-
-Google News나 정책브리핑 RSS를 보조 출처로 섞고 싶으면 `.env`에서 `GOOGLE_NEWS_ENABLED=true` 또는 `POLICY_RSS_ENABLED=true`로 켜세요.
-
-## 참고 제약
-
-카카오톡 일반 단톡방 직접 게시용 공식 서버 API는 제공되지 않습니다. 이 프로젝트는 PC 카카오톡 GUI 자동화 방식이므로 카카오톡 UI 변경, 로그인 상태, 창 포커스, 보안 정책에 영향을 받습니다.
+For stronger source privacy, the automation code should be moved to a private repository, while only public outputs such as `summaries/` and `podcast/` are published through a separate public Pages repository.
