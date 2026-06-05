@@ -585,6 +585,17 @@ class CoreTests(unittest.TestCase):
         self.assertIn("디 엑스 부문 제1 노조", speech)
         self.assertIn("영업이익 엔 퍼센트 성과급", speech)
 
+    def test_podcast_speech_removes_quote_marks_from_title_context(self):
+        speech = markdown_to_speech(
+            "🪖 2026-05-23 병무청 뉴스 브리핑\n"
+            "# 1️⃣ 유승준 \"공무원 해고설\" 모두 루머라 해명\n"
+            "유승준 씨가 병역 관련 루머를 해명했습니다.\n",
+            "2026-05-23",
+        )
+
+        self.assertIn("유승준 공무원 해고설 모두 루머라 해명 관련 보도입니다.", speech)
+        self.assertNotIn("\"공무원 해고설\" 관련 보도입니다.", speech)
+
     def test_podcast_no_article_message_is_exact(self):
         speech = markdown_to_speech(
             "🪖 2026-03-31 병무청 뉴스 브리핑\n확인된 주요 뉴스가 없습니다.",

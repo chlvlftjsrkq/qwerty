@@ -272,10 +272,15 @@ def ensure_title_ending(text: str) -> str:
     return text + "."
 
 
-def spoken_title(title: str) -> str:
+def clean_title_for_context(title: str) -> str:
     title = normalize_symbols_for_tts(remove_ellipsis(title).rstrip(" ,.!?。"))
     title = re.sub(r"\((\d+)\)", r"\1 번째", title)
     title = re.sub(r"[\[\]\"'“”‘’]", "", title)
+    return normalize_space(title)
+
+
+def spoken_title(title: str) -> str:
+    title = clean_title_for_context(title)
     if not title:
         return ""
     return ensure_title_ending(title)
@@ -364,7 +369,7 @@ def build_compact_lines(articles: list[dict[str, str]], max_chars: int) -> list[
     lines: list[str] = []
     for article in articles:
         number = article["number"]
-        title = trim_text(article["title"], 110)
+        title = clean_title_for_context(trim_text(article["title"], 110))
         sentences = split_sentences(article["body"])
         body = " ".join(sentences[:3]) if sentences else article["body"]
         body = trim_text(body, 420)
