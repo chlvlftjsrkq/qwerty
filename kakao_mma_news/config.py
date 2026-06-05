@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 def parse_bool(value: str | None, default: bool = False) -> bool:
@@ -33,6 +35,20 @@ def parse_list(value: str | None, default: list[str]) -> list[str]:
     if value is None or value.strip() == "":
         return default
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_json_list(value: str | None) -> list[dict[str, Any]]:
+    if value is None or value.strip() == "":
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
 
 
 def load_env_file(path: str | Path | None) -> None:
@@ -81,6 +97,7 @@ class Config:
     weather_location: str
     weather_latitude: float
     weather_longitude: float
+    weather_extra_locations: list[dict[str, Any]]
 
     naver_client_id: str
     naver_client_secret: str
@@ -152,6 +169,7 @@ def load_config(env_file: str | Path | None = ".env") -> Config:
         weather_location=os.getenv("WEATHER_LOCATION", "서울"),
         weather_latitude=parse_float(os.getenv("WEATHER_LATITUDE"), 37.5665),
         weather_longitude=parse_float(os.getenv("WEATHER_LONGITUDE"), 126.9780),
+        weather_extra_locations=parse_json_list(os.getenv("WEATHER_EXTRA_LOCATIONS")),
         naver_client_id=os.getenv("NAVER_CLIENT_ID", ""),
         naver_client_secret=os.getenv("NAVER_CLIENT_SECRET", ""),
         naver_news_enabled=parse_bool(os.getenv("NAVER_NEWS_ENABLED"), True),

@@ -97,6 +97,7 @@ jobs:
           $cronWeatherLocation = ""
           $cronWeatherLatitude = ""
           $cronWeatherLongitude = ""
+          $weatherExtraLocations = ""
 
           if (![string]::IsNullOrWhiteSpace($agencyInput)) {
             for ($i = 0; $i -lt $agencies.Count; $i++) {
@@ -132,6 +133,12 @@ jobs:
             $weatherLocation = [string]$selected.weather_location
             $weatherLatitude = [string]$selected.weather_latitude
             $weatherLongitude = [string]$selected.weather_longitude
+            if ($selected.PSObject.Properties.Name -contains "weather_extra_locations" -and $null -ne $selected.weather_extra_locations) {
+              $extraLocations = @($selected.weather_extra_locations)
+              if ($extraLocations.Count -gt 0) {
+                $weatherExtraLocations = ConvertTo-Json -InputObject $extraLocations -Compress -Depth 5
+              }
+            }
             $selectedQueryTerms = @($selected.query_terms | ForEach-Object { "$_".Trim() } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
             $selectedRequiredTerms = @($selected.required_terms | ForEach-Object { "$_".Trim() } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
           } elseif (![string]::IsNullOrWhiteSpace($cronAgencyName)) {
@@ -199,7 +206,8 @@ jobs:
             "WEATHER_ENABLED=$includeWeather",
             "WEATHER_LOCATION=$weatherLocation",
             "WEATHER_LATITUDE=$weatherLatitude",
-            "WEATHER_LONGITUDE=$weatherLongitude"
+            "WEATHER_LONGITUDE=$weatherLongitude",
+            "WEATHER_EXTRA_LOCATIONS=$weatherExtraLocations"
           )
           foreach ($line in $envLines) {
             Add-Content -Path $env:GITHUB_ENV -Value $line -Encoding UTF8
@@ -218,6 +226,9 @@ jobs:
           Write-Host "Target date range: $dateLabel"
           Write-Host "Episode id: $episodeId"
           Write-Host "Weather location: $weatherLocation"
+          if (![string]::IsNullOrWhiteSpace($weatherExtraLocations)) {
+            Write-Host "Weather extra locations: $weatherExtraLocations"
+          }
 
       - name: Verify local Python
         shell: powershell
@@ -455,6 +466,9 @@ jobs:
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Target date range: $env:DATE_LABEL" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Episode id: $env:EPISODE_ID" -Encoding UTF8
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Weather location: $env:WEATHER_LOCATION" -Encoding UTF8
+          if (![string]::IsNullOrWhiteSpace($env:WEATHER_EXTRA_LOCATIONS)) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Weather extra locations: $env:WEATHER_EXTRA_LOCATIONS" -Encoding UTF8
+          }
 
       - uses: actions/upload-artifact@v4
         if: always()

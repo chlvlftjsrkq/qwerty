@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from .config import Config
-from .news import KST
 
 
 WEATHER_CODE_TEXT = {
@@ -167,6 +165,100 @@ def _short_advice(temp_max: int | None, rain_prob: int | None, dust_grade: str) 
     return "외출 전 예보를 확인해 주세요."
 
 
+def _weather_locations(config: Config) -> list[dict[str, Any]]:
+    locations = [
+        {
+            "location": config.weather_location,
+            "latitude": config.weather_latitude,
+            "longitude": config.weather_longitude,
+        }
+    ]
+    for item in getattr(config, "weather_extra_locations", []) or []:
+        location = str(item.get("location") or item.get("weather_location") or "").strip()
+        try:
+            latitude = float(item.get("latitude", item.get("weather_latitude")))
+            longitude = float(item.get("longitude", item.get("weather_longitude")))
+        except (TypeError, ValueError):
+            continue
+        if location:
+            locations.append(
+                {
+                    "location": location,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                }
+            )
+    return locations
+
+
+def _fetch_weather_report(requests_module: Any, location: dict[str, Any], timeout: float) -> dict[str, Any]:
+    forecast = requests_module.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": location["latitude"],
+            "longitude": location["longitude"],
+            "timezone": "Asia/Seoul",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "forecast_days": 1,
+        },
+        timeout=timeout,
+    )
+    forecast.raise_for_status()
+    daily = forecast.json().get("daily", {})
+    weather_code = _round(_first_number(daily.get("weather_code")))
+    temp_max = _round(_first_number(daily.get("temperature_2m_max")))
+    temp_min = _round(_first_number(daily.get("temperature_2m_min")))
+    rain_prob = _round(_first_number(daily.get("precipitation_probability_max")))
+
+    air = requests_module.get(
+        "https://air-quality-api.open-meteo.com/v1/air-quality",
+        params={
+            "latitude": location["latitude"],
+            "longitude": location["longitude"],
+            "timezone": "Asia/Seoul",
+            "hourly": "pm10,pm2_5",
+            "forecast_days": 1,
+        },
+        timeout=timeout,
+    )
+    air.raise_for_status()
+    hourly = air.json().get("hourly", {})
+    pm10 = _round(_first_number(hourly.get("pm10")))
+    pm25 = _round(_first_number(hourly.get("pm2_5")))
+
+    return {
+        "location": location["location"],
+        "weather_text": WEATHER_CODE_TEXT.get(weather_code or -1, "날씨"),
+        "temp_max": temp_max,
+        "temp_min": temp_min,
+        "rain_prob": rain_prob,
+        "pm10": pm10,
+        "pm25": pm25,
+        "dust_grade": _worst_dust_grade(pm10, pm25),
+    }
+
+
+def _format_weather_report(report: dict[str, Any]) -> str:
+    rain_prob = report["rain_prob"]
+    dust_clause = _short_dust_clause(report["pm10"], report["pm25"])
+    rain_clause = f", 강수확률 {rain_prob}%" if rain_prob is not None and rain_prob >= 40 else ""
+    dust_sentence = f" {dust_clause}입니다." if dust_clause else ""
+    temp_max = report["temp_max"]
+    if temp_max is not None:
+        return f"{report['location']}은 최고 {temp_max}도, {report['weather_text']}{rain_clause}입니다.{dust_sentence}"
+    return f"{report['location']}은 {report['weather_text']}{rain_clause}입니다.{dust_sentence}"
+
+
+def _overall_short_advice(reports: list[dict[str, Any]]) -> str:
+    if any(report["rain_prob"] is not None and report["rain_prob"] >= 60 for report in reports):
+        return "우산을 챙겨 주세요."
+    if any(report["dust_grade"] in {"나쁨", "매우 나쁨"} for report in reports):
+        return "장시간 외출은 조절해 주세요."
+    if any(report["temp_max"] is not None and report["temp_max"] >= 28 for report in reports):
+        return "수분을 챙겨 주세요."
+    return "외출 전 예보를 확인해 주세요."
+
+
 def build_weather_summary(config: Config) -> str:
     if not config.weather_enabled:
         return ""
@@ -176,54 +268,20 @@ def build_weather_summary(config: Config) -> str:
     except ImportError:
         return ""
 
-    today = datetime.now(KST).date().isoformat()
-    location = config.weather_location
-    try:
-        forecast = requests.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": config.weather_latitude,
-                "longitude": config.weather_longitude,
-                "timezone": "Asia/Seoul",
-                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-                "forecast_days": 1,
-            },
-            timeout=config.request_timeout_seconds,
-        )
-        forecast.raise_for_status()
-        daily = forecast.json().get("daily", {})
-        weather_code = _round(_first_number(daily.get("weather_code")))
-        temp_max = _round(_first_number(daily.get("temperature_2m_max")))
-        temp_min = _round(_first_number(daily.get("temperature_2m_min")))
-        rain_prob = _round(_first_number(daily.get("precipitation_probability_max")))
+    locations = _weather_locations(config)
+    reports = []
+    failed_locations = []
+    for location in locations:
+        try:
+            reports.append(_fetch_weather_report(requests, location, config.request_timeout_seconds))
+        except Exception:
+            failed_locations.append(location["location"])
 
-        air = requests.get(
-            "https://air-quality-api.open-meteo.com/v1/air-quality",
-            params={
-                "latitude": config.weather_latitude,
-                "longitude": config.weather_longitude,
-                "timezone": "Asia/Seoul",
-                "hourly": "pm10,pm2_5",
-                "forecast_days": 1,
-            },
-            timeout=config.request_timeout_seconds,
-        )
-        air.raise_for_status()
-        hourly = air.json().get("hourly", {})
-        pm10 = _round(_first_number(hourly.get("pm10")))
-        pm25 = _round(_first_number(hourly.get("pm2_5")))
-    except Exception:
+    if not reports:
+        location = config.weather_location
         return f"🌤️ 오늘 {location} 날씨 정보는 일시적으로 확인하지 못했습니다. 외출 전 최신 예보를 한 번 더 확인해 주세요."
 
-    weather_text = WEATHER_CODE_TEXT.get(weather_code or -1, "날씨")
-    temp_clause = _temperature_clause(temp_min, temp_max)
-    weather_clause = _weather_clause(weather_text, rain_prob)
-    dust_grade = _worst_dust_grade(pm10, pm25)
-    dust_clause = _short_dust_clause(pm10, pm25)
-    advice = _short_advice(temp_max, rain_prob, dust_grade)
-
-    rain_clause = f", 강수확률 {rain_prob}%" if rain_prob is not None and rain_prob >= 40 else ""
-    dust_sentence = f" {dust_clause}입니다." if dust_clause else ""
-    if temp_clause:
-        return f"🌤️ 오늘 {location}은 최고 {temp_max}도, {weather_text}{rain_clause}입니다.{dust_sentence} {advice}"
-    return f"🌤️ 오늘 {location}은 {weather_text}{rain_clause}입니다.{dust_sentence} {advice}"
+    summary = f"🌤️ 오늘 {' '.join(_format_weather_report(report) for report in reports)} {_overall_short_advice(reports)}"
+    if failed_locations:
+        summary += f" {'·'.join(failed_locations)} 날씨는 일시적으로 확인하지 못했습니다."
+    return summary

@@ -64,6 +64,13 @@
       "weather_location": "대전",
       "weather_latitude": 36.3504,
       "weather_longitude": 127.3845,
+      "weather_extra_locations": [
+        {
+          "location": "인천",
+          "latitude": 37.4563,
+          "longitude": 126.7052
+        }
+      ],
       "query_terms": [
         "병무청",
         "병역판정검사",

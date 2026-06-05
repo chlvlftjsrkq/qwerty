@@ -446,6 +446,65 @@ class CoreTests(unittest.TestCase):
         self.assertIn("초미세먼지 26(보통)", summary)
         self.assertIn("수분을 챙겨 주세요", summary)
 
+    def test_weather_summary_can_include_extra_locations(self):
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        class FakeRequests:
+            @staticmethod
+            def get(url, **kwargs):
+                latitude = kwargs["params"]["latitude"]
+                if "air-quality" in url:
+                    if latitude == 37.4563:
+                        return FakeResponse({"hourly": {"pm10": [48], "pm2_5": [18]}})
+                    return FakeResponse({"hourly": {"pm10": [31], "pm2_5": [14]}})
+                if latitude == 37.4563:
+                    return FakeResponse(
+                        {
+                            "daily": {
+                                "weather_code": [3],
+                                "temperature_2m_max": [25],
+                                "temperature_2m_min": [17],
+                                "precipitation_probability_max": [20],
+                            }
+                        }
+                    )
+                return FakeResponse(
+                    {
+                        "daily": {
+                            "weather_code": [2],
+                            "temperature_2m_max": [28],
+                            "temperature_2m_min": [16],
+                            "precipitation_probability_max": [0],
+                        }
+                    }
+                )
+
+        config = SimpleNamespace(
+            weather_enabled=True,
+            weather_location="대전",
+            weather_latitude=36.3504,
+            weather_longitude=127.3845,
+            weather_extra_locations=[
+                {"location": "인천", "latitude": 37.4563, "longitude": 126.7052}
+            ],
+            request_timeout_seconds=3,
+        )
+        with patch.dict("sys.modules", {"requests": FakeRequests}):
+            summary = build_weather_summary(config)
+
+        self.assertIn("오늘 대전은 최고 28도", summary)
+        self.assertIn("인천은 최고 25도", summary)
+        self.assertIn("대전", summary)
+        self.assertIn("인천", summary)
+
     def test_podcast_speech_cleans_markdown(self):
         speech = markdown_to_speech(
             "🌤️ 오늘 서울은 맑고 최고 25도입니다.\n"
