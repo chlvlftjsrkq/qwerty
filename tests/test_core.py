@@ -525,10 +525,11 @@ class CoreTests(unittest.TestCase):
         self.assertIn("2026 년 5 월 16 일 기관 뉴스 음성 브리핑입니다.", speech)
         self.assertIn("오늘은 주요 기사 1 건을 제목과 핵심 내용 중심으로 전해드리겠습니다.", speech)
         self.assertIn(
-            "첫 번째 소식입니다. 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사 관련 보도입니다.",
+            "첫 번째 소식입니다. 병무청 에이 아이, 5 지 공공데이터 2026 년 5 월 16 일 기사 내용이 전해졌습니다.",
             speech,
         )
         self.assertIn("병무청이 공공데이터 행사를 열었습니다.", speech)
+        self.assertIn("에이 아이 활용 계획은 5 건입니다.", speech)
         self.assertNotIn("제목은", speech)
         self.assertNotIn("주요 내용입니다", speech)
         self.assertIn("에이 아이 활용 계획은 5 건입니다.", speech)
@@ -593,8 +594,37 @@ class CoreTests(unittest.TestCase):
             "2026-05-23",
         )
 
-        self.assertIn("유승준 공무원 해고설 모두 루머라 해명 관련 보도입니다.", speech)
-        self.assertNotIn("\"공무원 해고설\" 관련 보도입니다.", speech)
+        self.assertIn("유승준 씨가 공무원 해고설 모두 루머라고 해명했다는 내용입니다.", speech)
+        self.assertIn("병역기피 논란과 관련 제도 판단이 다시 다뤄졌습니다.", speech)
+        self.assertNotIn("\"공무원 해고설\"", speech)
+        self.assertNotIn("관련 보도입니다", speech)
+
+    def test_podcast_speech_has_title_sentence_and_two_body_sentences(self):
+        speech = markdown_to_speech(
+            "🪖 2026-06-04 병무청 뉴스 브리핑\n"
+            "1️⃣ 하나은행, 나라사랑통장 연령 제한 없앤다\n"
+            "하나은행이 나라사랑통장 가입의 연령 제한을 없애기로 했습니다.\n",
+            "2026-06-04",
+        )
+
+        self.assertIn("하나은행이 나라사랑통장 가입 연령 제한을 없애기로 했다는 내용입니다.", speech)
+        self.assertIn("금융 혜택 이용 대상 확대가 핵심입니다.", speech)
+        self.assertIn("혜택 대상과 이용 조건 확인이 중요한 내용입니다.", speech)
+        self.assertNotIn("관련 보도입니다", speech)
+
+    def test_podcast_title_sentence_uses_body_context_when_title_is_vague(self):
+        speech = markdown_to_speech(
+            "🪖 2026-06-04 병무청 뉴스 브리핑\n"
+            "1️⃣ 국민주권정부 출범 1년 남은 4년은 8년처럼\n"
+            "대통령이 예비군 훈련 중 사망 사건의 신속한 진상 규명을 지시했습니다.\n"
+            "훈련 안전관리와 진상 규명이 핵심 쟁점입니다.\n",
+            "2026-06-04",
+        )
+
+        self.assertIn("예비군 훈련 중 사망 사건은 신속한 진상 규명 지시로 이어졌습니다.", speech)
+        self.assertIn("훈련 안전관리와 진상 규명이 핵심 쟁점입니다.", speech)
+        self.assertNotIn("남은 4 년은 8 년처럼이라는 메시지가 나왔습니다.", speech)
+        self.assertNotIn("관련 보도입니다", speech)
 
     def test_podcast_no_article_message_is_exact(self):
         speech = markdown_to_speech(

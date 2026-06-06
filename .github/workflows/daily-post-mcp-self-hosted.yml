@@ -295,6 +295,10 @@ jobs:
           TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
           TTS_PITCH: ${{ vars.TTS_PITCH || '+0Hz' }}
           TTS_TARGET_MINUTES: ${{ vars.TTS_TARGET_MINUTES || '5' }}
+          PODCAST_SCRIPT_PROVIDER: ${{ vars.PODCAST_SCRIPT_PROVIDER || 'codex' }}
+          PODCAST_SCRIPT_TIMEOUT_SECONDS: ${{ vars.PODCAST_SCRIPT_TIMEOUT_SECONDS || '300' }}
+          CODEX_COMMAND: ${{ vars.CODEX_COMMAND || 'C:\Users\April\AppData\Roaming\npm\codex.cmd' }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL || '' }}
           PODCAST_BASE_URL: ${{ vars.PODCAST_BASE_URL || format('https://{0}.github.io/{1}/podcast/', github.repository_owner, github.event.repository.name) }}
           PODCAST_LISTEN_URL_TEMPLATE: ${{ vars.PODCAST_LISTEN_URL_TEMPLATE || '' }}
         run: |
@@ -302,7 +306,7 @@ jobs:
           if (!(Test-Path $summaryPath)) {
             throw "No summary Markdown file found: $summaryPath"
           }
-          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date "$env:DATE_LABEL" --episode-id "$env:EPISODE_ID" --summary "$summaryPath" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES"
+          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date "$env:DATE_LABEL" --episode-id "$env:EPISODE_ID" --summary "$summaryPath" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES" --script-provider "$env:PODCAST_SCRIPT_PROVIDER" --codex-command "$env:CODEX_COMMAND" --codex-model "$env:CODEX_MODEL" --script-timeout-seconds "$env:PODCAST_SCRIPT_TIMEOUT_SECONDS"
           if ([string]::IsNullOrWhiteSpace($env:PODCAST_LISTEN_URL_TEMPLATE)) {
             $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$env:EPISODE_ID"
           } else {
