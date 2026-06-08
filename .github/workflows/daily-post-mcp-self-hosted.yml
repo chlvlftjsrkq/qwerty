@@ -306,7 +306,20 @@ jobs:
           if (!(Test-Path $summaryPath)) {
             throw "No summary Markdown file found: $summaryPath"
           }
-          & $env:PYTHON_EXE scripts/build_podcast_audio.py --date "$env:DATE_LABEL" --episode-id "$env:EPISODE_ID" --summary "$summaryPath" --site-base-url "$env:PODCAST_BASE_URL" --target-minutes "$env:TTS_TARGET_MINUTES" --script-provider "$env:PODCAST_SCRIPT_PROVIDER" --codex-command "$env:CODEX_COMMAND" --codex-model "$env:CODEX_MODEL" --script-timeout-seconds "$env:PODCAST_SCRIPT_TIMEOUT_SECONDS"
+          $podcastArgs = @(
+            "--date", "$env:DATE_LABEL",
+            "--episode-id", "$env:EPISODE_ID",
+            "--summary", "$summaryPath",
+            "--site-base-url", "$env:PODCAST_BASE_URL",
+            "--target-minutes", "$env:TTS_TARGET_MINUTES",
+            "--script-provider", "$env:PODCAST_SCRIPT_PROVIDER",
+            "--codex-command", "$env:CODEX_COMMAND",
+            "--script-timeout-seconds", "$env:PODCAST_SCRIPT_TIMEOUT_SECONDS"
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:CODEX_MODEL)) {
+            $podcastArgs += @("--codex-model", "$env:CODEX_MODEL")
+          }
+          & $env:PYTHON_EXE scripts/build_podcast_audio.py @podcastArgs
           if ([string]::IsNullOrWhiteSpace($env:PODCAST_LISTEN_URL_TEMPLATE)) {
             $listenUrl = $env:PODCAST_BASE_URL.TrimEnd("/") + "/?date=$env:EPISODE_ID"
           } else {
