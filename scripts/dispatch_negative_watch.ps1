@@ -19,7 +19,9 @@ param(
     [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
     [string]$McpCommand = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Scripts\kakaotalk-mcp.exe",
     [string]$CodexCommand = "C:\Users\April\AppData\Roaming\npm\codex.cmd",
-    [string]$FallbackToLocal = "true"
+    [string]$FallbackToLocal = "true",
+    [string]$EnsureRunner = "true",
+    [string]$RunnerTaskName = "GitHubActionsRunner-qwerty"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,6 +54,39 @@ function Write-DispatchLog {
     Add-Content -LiteralPath $LogPath -Value ($LogObject | ConvertTo-Json -Compress) -Encoding UTF8
 }
 
+function Test-RunnerListenerRunning {
+    try {
+        $process = Get-CimInstance Win32_Process -Filter "Name = 'Runner.Listener.exe'" |
+            Where-Object { $_.CommandLine -like "*actions-runner-qwerty*" } |
+            Select-Object -First 1
+        return $null -ne $process
+    } catch {
+        return $false
+    }
+}
+
+function Ensure-GitHubRunner {
+    if (-not (Convert-ToBool $EnsureRunner)) {
+        return
+    }
+    if (Test-RunnerListenerRunning) {
+        return
+    }
+
+    try {
+        $task = Get-ScheduledTask -TaskName $RunnerTaskName -ErrorAction Stop
+        if ($task.State -ne "Running") {
+            Start-ScheduledTask -TaskName $RunnerTaskName
+        }
+        Start-Sleep -Seconds 5
+        if (-not (Test-RunnerListenerRunning)) {
+            Write-Warning "GitHub runner task was started, but Runner.Listener.exe is not visible yet."
+        }
+    } catch {
+        Write-Warning "GitHub runner task could not be started: $($_.Exception.Message)"
+    }
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if (!(Test-Path -LiteralPath $GhExe)) {
     throw "GitHub CLI was not found: $GhExe"
@@ -62,6 +97,8 @@ if (!(Test-Path -LiteralPath $PythonExe)) {
 if ([string]::IsNullOrWhiteSpace($TargetChatroom)) {
     $TargetChatroom = Get-DefaultTargetChatroom
 }
+
+Ensure-GitHubRunner
 
 $argsList = @(
     "workflow", "run", $Workflow,
