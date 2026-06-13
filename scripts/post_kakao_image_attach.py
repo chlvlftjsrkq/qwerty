@@ -11,6 +11,7 @@ from pathlib import Path
 import pyautogui
 import pyperclip
 from kakao_mcp import controller
+from kakao_login_guard import ensure_kakao_ready
 
 pyautogui.FAILSAFE = False
 
@@ -110,6 +111,9 @@ def attach_image(
 ) -> dict:
     if not image_path.exists():
         raise FileNotFoundError(f"Image file not found: {image_path}")
+
+    guard_result = ensure_kakao_ready(room=room, wait_seconds=max(15.0, open_wait * max(1, open_attempts)))
+    print(json.dumps({"kakao_login_guard": guard_result}, ensure_ascii=False))
 
     hwnd, rect, open_result = bring_room_to_front(room, open_wait, open_attempts, open_retry_wait)
     left, _top, _right, bottom = rect

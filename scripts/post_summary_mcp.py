@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-chars", type=int, default=3000, help="Maximum characters per KakaoTalk message")
     parser.add_argument("--open-attempts", type=int, default=4, help="KakaoTalk room open retry attempts")
     parser.add_argument("--open-retry-wait", type=float, default=1.5, help="Seconds to wait between room open retries")
+    parser.add_argument("--skip-login-guard", action="store_true", help="Skip local KakaoTalk login recovery guard")
     parser.add_argument("--verify", action="store_true", help="Read recent messages and verify the first chunk")
     return parser.parse_args()
 
@@ -88,6 +89,15 @@ async def post_summary(args: argparse.Namespace) -> int:
         raise RuntimeError(f"Summary file is empty: {summary_path}")
 
     chunks = split_message(message, args.max_chars)
+    if not args.skip_login_guard:
+        from kakao_login_guard import ensure_kakao_ready
+
+        guard_result = ensure_kakao_ready(
+            room=args.room,
+            wait_seconds=max(15.0, args.open_retry_wait * max(1, args.open_attempts)),
+        )
+        print(json.dumps({"kakao_login_guard": guard_result}, ensure_ascii=False))
+
     command = resolve_mcp_command(args.mcp_command)
     params = StdioServerParameters(command=command, args=[])
 
