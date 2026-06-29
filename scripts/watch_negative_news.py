@@ -823,8 +823,8 @@ def looks_like_clipped_korean_fragment(text: str) -> bool:
 def fallback_alert_summary(item: NewsItem, category: str, matched_terms: list[str]) -> str:
     terms = compact_terms(matched_terms, 3)
     if terms:
-        return f"대표 기사에서 {terms} 관련 표현이 확인됐습니다. {category} 이슈로 번질 수 있어 내용을 확인할 필요가 있습니다."
-    return "대표 기사에서 병역 관련 부정 이슈로 번질 수 있는 내용이 확인됐습니다. 사실관계와 후속 보도를 함께 확인할 필요가 있습니다."
+        return f"대표 기사에서 {terms} 관련 표현이 확인됐습니다. 병무청 또는 병역 관련 이슈로 이어질 수 있어 내용을 확인할 필요가 있습니다."
+    return "대표 기사에서 병무청 또는 병역 관련 이슈로 확인할 내용이 발견됐습니다. 사실관계와 후속 보도를 함께 확인할 필요가 있습니다."
 
 
 def salvage_after_leading_fragment(text: str) -> str:
@@ -1517,11 +1517,7 @@ def build_alert_message(
 ) -> str:
     url = item.url or item.naver_url
     related_items = related_items or []
-    lead = "병역 관련 부정 이슈로 번질 수 있는 보도가 확인됐습니다."
-    if classification.severity == "높음":
-        lead = "병역 관련 여론 이슈로 확산될 수 있는 보도가 확인됐습니다."
-    elif classification.severity == "낮음":
-        lead = "병역 관련 모니터링 후보 보도가 확인됐습니다."
+    lead = "병무청, 병역 관련 이슈 보도가 확인됐습니다."
     summary = polish_alert_summary(classification.summary, item, classification.category, classification.matched_terms)
     if related_items:
         summary = (
@@ -1533,8 +1529,7 @@ def build_alert_message(
         "",
         lead,
         "",
-        f"위험도: {classification.severity}",
-        f"유형: {classification.category}",
+        f"중요도: {classification.severity}",
         f"발행: {format_published_label(item)}",
         "",
         "📰 대표 기사",
