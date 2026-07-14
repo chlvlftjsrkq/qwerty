@@ -17,6 +17,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from kakao_mma_news.config import load_config
+from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.kakao import post_to_kakao
 
@@ -84,6 +85,19 @@ async def post_summary(args: argparse.Namespace) -> int:
     summary_path = Path(args.summary)
     if not summary_path.exists():
         raise FileNotFoundError(f"Summary file not found: {summary_path}")
+    if is_kakao_delivery_paused():
+        print(
+            json.dumps(
+                {
+                    **delivery_status(room=args.room, delivery_type="text"),
+                    "summary": str(summary_path),
+                    "skipped": True,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     message = summary_path.read_text(encoding="utf-8").lstrip("\ufeff").strip()
     if not message:
         raise RuntimeError(f"Summary file is empty: {summary_path}")
@@ -116,6 +130,19 @@ async def post_summary(args: argparse.Namespace) -> int:
                 attempts=args.open_attempts,
                 wait_seconds=args.open_retry_wait,
             )
+            if is_kakao_delivery_paused():
+                print(
+                    json.dumps(
+                        {
+                            **delivery_status(room=args.room, delivery_type="text"),
+                            "summary": str(summary_path),
+                            "skipped": True,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return 0
             if open_result.get("error"):
                 print(json.dumps({"open_result": open_result}, ensure_ascii=False))
                 config = load_config(None)
@@ -128,16 +155,18 @@ async def post_summary(args: argparse.Namespace) -> int:
                     kakao_wait_seconds=max(5.0, args.open_retry_wait * 3),
                     kakao_step_delay_seconds=1.0,
                 )
-                post_to_kakao(config, message)
+                posted = post_to_kakao(config, message)
                 print(
                     json.dumps(
                         {
                             "room": args.room,
                             "summary": str(summary_path),
                             "chunks": len(chunks),
-                            "sent": [{"message": "Message sent via clipboard fallback"}],
+                            "sent": [{"message": "Message sent via clipboard fallback"}] if posted else [],
                             "verify_found": None,
                             "fallback": "clipboard",
+                            "delivery_paused": not posted,
+                            "skipped": not posted,
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -147,6 +176,20 @@ async def post_summary(args: argparse.Namespace) -> int:
 
             sent = []
             for index, chunk in enumerate(chunks, start=1):
+                if is_kakao_delivery_paused():
+                    print(
+                        json.dumps(
+                            {
+                                **delivery_status(room=args.room, delivery_type="text"),
+                                "summary": str(summary_path),
+                                "skipped": True,
+                                "chunks_sent": len(sent),
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                    return 0
                 body = chunk if len(chunks) == 1 else f"({index}/{len(chunks)})\n{chunk}"
                 result = await call_tool(
                     session,

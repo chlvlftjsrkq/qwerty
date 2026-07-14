@@ -72,6 +72,9 @@ def main() -> int:
     if args.dry_run:
         should_post = False
     if should_post:
-        post_to_kakao(config, summary)
-        print("카카오톡 게시 완료")
+        posted = post_to_kakao(config, summary)
+        if posted:
+            print("카카오톡 게시 완료")
+        else:
+            print("카카오톡 자동발송이 일시정지되어 게시를 건너뛰었습니다.")
     return 0

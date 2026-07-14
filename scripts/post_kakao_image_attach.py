@@ -8,9 +8,14 @@ import sys
 import time
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import pyautogui
 import pyperclip
 from kakao_mcp import controller
+from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
 from kakao_login_guard import ensure_kakao_ready
 
 pyautogui.FAILSAFE = False
@@ -109,11 +114,24 @@ def attach_image(
     open_retry_wait: float,
     send_wait: float,
 ) -> dict:
+    if is_kakao_delivery_paused():
+        return {
+            **delivery_status(room=room, delivery_type="image"),
+            "image": str(image_path),
+            "skipped": True,
+        }
     if not image_path.exists():
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
     guard_result = ensure_kakao_ready(room=room, wait_seconds=max(15.0, open_wait * max(1, open_attempts)))
     print(json.dumps({"kakao_login_guard": guard_result}, ensure_ascii=False))
+
+    if is_kakao_delivery_paused():
+        return {
+            **delivery_status(room=room, delivery_type="image"),
+            "image": str(image_path),
+            "skipped": True,
+        }
 
     hwnd, rect, open_result = bring_room_to_front(room, open_wait, open_attempts, open_retry_wait)
     left, _top, _right, bottom = rect
@@ -121,6 +139,12 @@ def attach_image(
     # PC Kakao places the file attachment icon near the lower-left of the chat window.
     file_icon_x = left + 87
     file_icon_y = bottom - 25
+    if is_kakao_delivery_paused():
+        return {
+            **delivery_status(room=room, delivery_type="image"),
+            "image": str(image_path),
+            "skipped": True,
+        }
     pyautogui.click(file_icon_x, file_icon_y)
     time.sleep(1.0)
     dialog_after_click = open_dialog_visible()

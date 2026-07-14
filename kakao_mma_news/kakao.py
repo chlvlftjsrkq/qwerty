@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from .config import Config
+from .delivery_control import is_kakao_delivery_paused
 
 
 def split_message(message: str, max_chars: int) -> list[str]:
@@ -60,7 +61,9 @@ def _activate_kakao_window(config: Config) -> bool:
     return False
 
 
-def post_to_kakao(config: Config, message: str) -> None:
+def post_to_kakao(config: Config, message: str) -> bool:
+    if is_kakao_delivery_paused():
+        return False
     if platform.system() != "Windows":
         raise RuntimeError("PC 카카오톡 자동 게시는 Windows GUI 환경에서만 실행할 수 있습니다.")
     if not config.target_chatroom:
@@ -74,6 +77,8 @@ def post_to_kakao(config: Config, message: str) -> None:
 
     pyautogui.FAILSAFE = True
     _launch_kakao(config)
+    if is_kakao_delivery_paused():
+        return False
     focused = _activate_kakao_window(config)
     if not focused:
         raise RuntimeError(
@@ -98,6 +103,8 @@ def post_to_kakao(config: Config, message: str) -> None:
 
     chunks = split_message(message, config.kakao_max_chunk_chars)
     for index, chunk in enumerate(chunks, start=1):
+        if is_kakao_delivery_paused():
+            return False
         body = chunk if len(chunks) == 1 else f"({index}/{len(chunks)})\n{chunk}"
         pyperclip.copy(body)
         pyautogui.hotkey("ctrl", "v")
@@ -105,3 +112,4 @@ def post_to_kakao(config: Config, message: str) -> None:
         if config.kakao_send_enter:
             pyautogui.press("enter")
         time.sleep(config.kakao_step_delay_seconds)
+    return True

@@ -23,6 +23,11 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
+
 KST = timezone(timedelta(hours=9), "KST")
 
 DEFAULT_QUERIES = [
@@ -1835,6 +1840,24 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
+    if not args.dry_run and is_kakao_delivery_paused():
+        print(
+            json.dumps(
+                {
+                    **delivery_status(room=args.room, delivery_type="negative_news_watch"),
+                    "dry_run": False,
+                    "skipped": True,
+                    "reason": "kakao_delivery_paused",
+                    "fetched_count": 0,
+                    "alert_count": 0,
+                    "posted": 0,
+                    "state_updated": False,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     state_path = Path(args.state)
