@@ -1059,6 +1059,15 @@ def extract_gemini_pcm(payload: dict[str, Any]) -> tuple[bytes, str]:
     raise RuntimeError("Gemini response did not contain audio data.")
 
 
+def normalize_gemini_api_key(value: str) -> str:
+    normalized = (value or "").strip().strip("\ufeff").strip()
+    try:
+        normalized.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise RuntimeError("GEMINI_API_KEY contains invalid non-ASCII characters.") from exc
+    return normalized
+
+
 def request_gemini_pcm(
     text: str,
     api_key: str,
@@ -1074,7 +1083,8 @@ def request_gemini_pcm(
     model_name = model.removeprefix("models/").strip()
     if not re.fullmatch(r"[A-Za-z0-9._-]+", model_name):
         raise ValueError(f"Invalid Gemini TTS model name: {model}")
-    if not api_key.strip():
+    normalized_api_key = normalize_gemini_api_key(api_key)
+    if not normalized_api_key:
         raise RuntimeError("GEMINI_API_KEY is required on Gemini TTS days.")
 
     narration_prompt = (
@@ -1096,12 +1106,12 @@ def request_gemini_pcm(
     }
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-        headers={"x-goog-api-key": api_key.strip()},
+        headers={"x-goog-api-key": normalized_api_key},
         json=payload,
         timeout=(15, timeout_seconds),
     )
     if not response.ok:
-        details = response.text[:1000].replace(api_key.strip(), "[redacted]")
+        details = response.text[:1000].replace(normalized_api_key, "[redacted]")
         raise RuntimeError(f"Gemini TTS request failed ({response.status_code}): {details}")
     return extract_gemini_pcm(response.json())
 

@@ -37,6 +37,7 @@ from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import (
     format_spoken_date,
     markdown_to_speech,
+    normalize_gemini_api_key,
     parse_pcm_mime_type,
     resolve_tts_provider,
     validate_date_label,
@@ -663,6 +664,9 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(2, wav_file.getsampwidth())
                 self.assertEqual(24000, wav_file.getframerate())
                 self.assertEqual(2400, wav_file.getnframes())
+
+    def test_gemini_api_key_normalization_removes_powershell_bom(self):
+        self.assertEqual("test-api-key", normalize_gemini_api_key("\ufefftest-api-key\r\n"))
 
     def test_negative_watch_groups_same_person_issue(self):
         first = NewsItem(
