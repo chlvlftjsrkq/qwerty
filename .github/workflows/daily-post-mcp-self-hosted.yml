@@ -295,6 +295,11 @@ jobs:
           TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
           TTS_PITCH: ${{ vars.TTS_PITCH || '+0Hz' }}
           TTS_TARGET_MINUTES: ${{ vars.TTS_TARGET_MINUTES || '5' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview' }}
+          GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}
+          GEMINI_TTS_START_DATE: ${{ vars.GEMINI_TTS_START_DATE || '2026-07-15' }}
+          GEMINI_TTS_TIMEOUT_SECONDS: ${{ vars.GEMINI_TTS_TIMEOUT_SECONDS || '300' }}
           PODCAST_SCRIPT_PROVIDER: ${{ vars.PODCAST_SCRIPT_PROVIDER || 'codex' }}
           PODCAST_SCRIPT_TIMEOUT_SECONDS: ${{ vars.PODCAST_SCRIPT_TIMEOUT_SECONDS || '300' }}
           CODEX_COMMAND: ${{ vars.CODEX_COMMAND || 'C:\Users\April\AppData\Roaming\npm\codex.cmd' }}

@@ -1,6 +1,9 @@
 import re
+import tempfile
 import unittest
+import wave
 from datetime import date, datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -31,7 +34,14 @@ from kakao_mma_news.summarize import (
     summarize_heuristic,
 )
 from kakao_mma_news.weather import build_weather_summary
-from scripts.build_podcast_audio import format_spoken_date, markdown_to_speech, validate_date_label
+from scripts.build_podcast_audio import (
+    format_spoken_date,
+    markdown_to_speech,
+    parse_pcm_mime_type,
+    resolve_tts_provider,
+    validate_date_label,
+    write_pcm_wave,
+)
 from scripts.is_korean_business_day import business_day_status
 from scripts.watch_negative_news import (
     Classification,
@@ -633,6 +643,26 @@ class CoreTests(unittest.TestCase):
         )
         self.assertIn("주요 기사가 확인되지 않았습니다.", speech)
         self.assertNotIn("많지 않았습니다", speech)
+
+    def test_alternate_tts_starts_with_gemini_and_switches_daily(self):
+        provider, schedule_date = resolve_tts_provider("alternate", "2026-07-15", "2026-07-15")
+        self.assertEqual("gemini", provider)
+        self.assertEqual(date(2026, 7, 15), schedule_date)
+        self.assertEqual("edge", resolve_tts_provider("alternate", "2026-07-16", "2026-07-15")[0])
+        self.assertEqual("gemini", resolve_tts_provider("alternate", "2026-07-17", "2026-07-15")[0])
+
+    def test_gemini_pcm_is_wrapped_as_24khz_mono_wave(self):
+        sample_rate, channels, sample_width = parse_pcm_mime_type("audio/l16; rate=24000; channels=1")
+        self.assertEqual((24000, 1, 2), (sample_rate, channels, sample_width))
+        pcm = b"\x00\x00" * 2400
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wav_path = Path(temp_dir) / "sample.wav"
+            write_pcm_wave(pcm, wav_path, sample_rate, channels, sample_width)
+            with wave.open(str(wav_path), "rb") as wav_file:
+                self.assertEqual(1, wav_file.getnchannels())
+                self.assertEqual(2, wav_file.getsampwidth())
+                self.assertEqual(24000, wav_file.getframerate())
+                self.assertEqual(2400, wav_file.getnframes())
 
     def test_negative_watch_groups_same_person_issue(self):
         first = NewsItem(

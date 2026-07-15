@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+import wave
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+
+DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
+DEFAULT_GEMINI_TTS_VOICE = "Kore"
+DEFAULT_GEMINI_TTS_START_DATE = "2026-07-15"
 
 
 NUMBER_WORDS = {
@@ -104,10 +113,49 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary", default="", help="Summary Markdown path. Defaults to runs/summary-YYYY-MM-DD.md.")
     parser.add_argument("--podcast-dir", default="podcast", help="Podcast output directory.")
     parser.add_argument("--site-base-url", default=os.getenv("PODCAST_BASE_URL", ""), help="Public podcast page URL.")
-    parser.add_argument("--provider", default=os.getenv("TTS_PROVIDER", "edge"), choices=["edge"], help="TTS provider.")
+    parser.add_argument(
+        "--provider",
+        default=os.getenv("TTS_PROVIDER", "edge"),
+        choices=["edge", "gemini", "alternate"],
+        help="TTS provider. alternate uses Gemini every other KST calendar day and Edge on the intervening days.",
+    )
     parser.add_argument("--voice", default=os.getenv("TTS_VOICE", "ko-KR-SunHiNeural"), help="edge-tts voice.")
     parser.add_argument("--rate", default=os.getenv("TTS_RATE", "+0%"), help="edge-tts rate, e.g. +0%.")
     parser.add_argument("--pitch", default=os.getenv("TTS_PITCH", "+0Hz"), help="edge-tts pitch, e.g. +0Hz.")
+    parser.add_argument(
+        "--gemini-model",
+        default=os.getenv("GEMINI_TTS_MODEL", DEFAULT_GEMINI_TTS_MODEL),
+        help="Gemini TTS model.",
+    )
+    parser.add_argument(
+        "--gemini-voice",
+        default=os.getenv("GEMINI_TTS_VOICE", DEFAULT_GEMINI_TTS_VOICE),
+        help="Gemini prebuilt voice name.",
+    )
+    parser.add_argument(
+        "--alternate-start-date",
+        default=os.getenv("GEMINI_TTS_START_DATE", DEFAULT_GEMINI_TTS_START_DATE),
+        help="KST date that starts the every-other-day Gemini schedule, in YYYY-MM-DD format.",
+    )
+    parser.add_argument(
+        "--generation-date",
+        default=os.getenv("TTS_GENERATION_DATE", ""),
+        help="Optional KST generation date override for deterministic scheduling tests.",
+    )
+    parser.add_argument(
+        "--gemini-timeout-seconds",
+        type=float,
+        default=float(os.getenv("GEMINI_TTS_TIMEOUT_SECONDS", "300")),
+        help="Gemini TTS request timeout.",
+    )
+    parser.add_argument("--ffmpeg-command", default=os.getenv("FFMPEG_COMMAND", "ffmpeg"), help="ffmpeg command or path.")
+    parser.add_argument("--ffprobe-command", default=os.getenv("FFPROBE_COMMAND", "ffprobe"), help="ffprobe command or path.")
+    parser.add_argument(
+        "--strict-provider",
+        action="store_true",
+        default=os.getenv("TTS_STRICT_PROVIDER", "").strip().lower() in {"1", "true", "yes", "y", "on"},
+        help="Fail instead of falling back to Edge when Gemini synthesis is unavailable.",
+    )
     parser.add_argument(
         "--target-minutes",
         type=float,
@@ -750,6 +798,34 @@ def _strip_code_fence(text: str) -> str:
     return text
 
 
+def parse_schedule_date(value: str, label: str) -> date:
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"{label} must use YYYY-MM-DD format: {value}") from exc
+
+
+def resolve_tts_provider(
+    provider: str,
+    generation_date: str = "",
+    alternate_start_date: str = DEFAULT_GEMINI_TTS_START_DATE,
+) -> tuple[str, date]:
+    schedule_date = (
+        parse_schedule_date(generation_date, "generation_date")
+        if generation_date.strip()
+        else datetime.now(ZoneInfo("Asia/Seoul")).date()
+    )
+    normalized = provider.strip().lower()
+    if normalized in {"edge", "gemini"}:
+        return normalized, schedule_date
+    if normalized != "alternate":
+        raise ValueError(f"Unsupported TTS provider: {provider}")
+
+    anchor = parse_schedule_date(alternate_start_date, "alternate_start_date")
+    selected = "gemini" if (schedule_date - anchor).days % 2 == 0 else "edge"
+    return selected, schedule_date
+
+
 def _clean_llm_script(text: str) -> str:
     text = _strip_code_fence(text).replace("\r\n", "\n").replace("\r", "\n")
     lines = [normalize_space(line) for line in text.splitlines()]
@@ -871,6 +947,7 @@ def podcast_script_with_codex(
 
     env = os.environ.copy()
     env.setdefault("NO_COLOR", "1")
+    env.pop("GEMINI_API_KEY", None)
     try:
         result = subprocess.run(
             command,
@@ -942,6 +1019,219 @@ async def synthesize_edge(text: str, output_path: Path, voice: str, rate: str, p
     await communicate.save(str(output_path))
 
 
+def parse_pcm_mime_type(mime_type: str) -> tuple[int, int, int]:
+    parts = [part.strip() for part in (mime_type or "").split(";") if part.strip()]
+    media_type = parts[0].lower() if parts else ""
+    if media_type not in {"audio/l16", "audio/pcm", "audio/raw"}:
+        raise RuntimeError(f"Unexpected Gemini audio MIME type: {mime_type or '(missing)'}")
+
+    parameters: dict[str, str] = {}
+    for part in parts[1:]:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        parameters[key.strip().lower()] = value.strip().strip('"')
+    try:
+        sample_rate = int(parameters.get("rate", "24000"))
+        channels = int(parameters.get("channels", "1"))
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid Gemini PCM parameters: {mime_type}") from exc
+    if sample_rate <= 0 or channels <= 0:
+        raise RuntimeError(f"Invalid Gemini PCM parameters: {mime_type}")
+    return sample_rate, channels, 2
+
+
+def extract_gemini_pcm(payload: dict[str, Any]) -> tuple[bytes, str]:
+    for candidate in payload.get("candidates", []):
+        content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
+        for part in content.get("parts", []):
+            if not isinstance(part, dict):
+                continue
+            inline_data = part.get("inlineData") or part.get("inline_data")
+            if not isinstance(inline_data, dict) or not inline_data.get("data"):
+                continue
+            try:
+                pcm = base64.b64decode(str(inline_data["data"]), validate=True)
+            except (ValueError, TypeError) as exc:
+                raise RuntimeError("Gemini returned invalid base64 audio data.") from exc
+            mime_type = str(inline_data.get("mimeType") or inline_data.get("mime_type") or "")
+            return pcm, mime_type
+    raise RuntimeError("Gemini response did not contain audio data.")
+
+
+def request_gemini_pcm(
+    text: str,
+    api_key: str,
+    model: str,
+    voice: str,
+    timeout_seconds: float,
+) -> tuple[bytes, str]:
+    try:
+        import requests
+    except ImportError as exc:
+        raise RuntimeError("requests가 설치되어 있지 않습니다. requirements.txt를 설치하세요.") from exc
+
+    model_name = model.removeprefix("models/").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", model_name):
+        raise ValueError(f"Invalid Gemini TTS model name: {model}")
+    if not api_key.strip():
+        raise RuntimeError("GEMINI_API_KEY is required on Gemini TTS days.")
+
+    narration_prompt = (
+        "다음 한국어 원고를 차분하고 또렷한 공공 뉴스 아나운서처럼 자연스럽게 읽어 주세요. "
+        "원고의 사실과 문장 순서를 바꾸거나 내용을 덧붙이지 마세요. "
+        "숫자와 고유명사는 한국어 문맥에 맞게 분명히 발음하고, 기사 사이에는 짧게 호흡해 주세요.\n\n"
+        f"{text}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": narration_prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {"voiceName": voice},
+                }
+            },
+        },
+    }
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+        headers={"x-goog-api-key": api_key.strip()},
+        json=payload,
+        timeout=(15, timeout_seconds),
+    )
+    if not response.ok:
+        details = response.text[:1000].replace(api_key.strip(), "[redacted]")
+        raise RuntimeError(f"Gemini TTS request failed ({response.status_code}): {details}")
+    return extract_gemini_pcm(response.json())
+
+
+def write_pcm_wave(
+    pcm: bytes,
+    output_path: Path,
+    sample_rate: int,
+    channels: int,
+    sample_width: int = 2,
+) -> None:
+    frame_width = channels * sample_width
+    if not pcm or len(pcm) % frame_width != 0:
+        raise RuntimeError("Gemini PCM byte length is not aligned to complete audio frames.")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(output_path), "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm)
+
+
+def resolve_media_command(command: str) -> str:
+    candidate = Path(command).expanduser()
+    if candidate.is_file():
+        return str(candidate.resolve())
+    resolved = shutil.which(command)
+    if resolved:
+        return resolved
+    raise RuntimeError(f"Required media command was not found: {command}")
+
+
+def transcode_wave_to_mp3(wav_path: Path, output_path: Path, ffmpeg_command: str) -> None:
+    ffmpeg = resolve_media_command(ffmpeg_command)
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(wav_path),
+            "-map_metadata",
+            "-1",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "24000",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Gemini WAV to MP3 conversion failed: {result.stderr[-1200:].strip()}")
+
+
+def probe_mp3(output_path: Path, ffprobe_command: str) -> dict[str, Any]:
+    ffprobe = resolve_media_command(ffprobe_command)
+    result = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name,sample_rate,channels,channel_layout,bit_rate:format=format_name,duration,size",
+            "-of",
+            "json",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"MP3 validation failed: {result.stderr[-1200:].strip()}")
+    try:
+        payload = json.loads(result.stdout)
+        stream = payload["streams"][0]
+        format_info = payload["format"]
+        duration = float(format_info["duration"])
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("MP3 validation did not find a readable audio stream.") from exc
+    if stream.get("codec_name") != "mp3" or duration <= 0:
+        raise RuntimeError(f"Unexpected MP3 stream metadata: {payload}")
+    return {
+        "codec": stream.get("codec_name"),
+        "sample_rate": int(stream.get("sample_rate", 0)),
+        "channels": int(stream.get("channels", 0)),
+        "bit_rate": int(stream.get("bit_rate", 0) or 0),
+        "duration_seconds": round(duration, 3),
+        "size_bytes": int(format_info.get("size", 0) or 0),
+    }
+
+
+async def synthesize_gemini(
+    text: str,
+    output_path: Path,
+    api_key: str,
+    model: str,
+    voice: str,
+    timeout_seconds: float,
+    ffmpeg_command: str,
+    ffprobe_command: str,
+) -> dict[str, Any]:
+    def generate() -> dict[str, Any]:
+        pcm, mime_type = request_gemini_pcm(text, api_key, model, voice, timeout_seconds)
+        sample_rate, channels, sample_width = parse_pcm_mime_type(mime_type)
+        with tempfile.TemporaryDirectory(prefix="gemini-tts-") as temp_dir:
+            wav_path = Path(temp_dir) / "gemini-tts.wav"
+            write_pcm_wave(pcm, wav_path, sample_rate, channels, sample_width)
+            transcode_wave_to_mp3(wav_path, output_path, ffmpeg_command)
+        return probe_mp3(output_path, ffprobe_command)
+
+    return await asyncio.to_thread(generate)
+
+
 def read_manifest(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"episodes": []}
@@ -1011,8 +1301,37 @@ async def build() -> int:
     audio_path = audio_dir / f"{episode_id}.mp3"
     if audio_path.exists():
         audio_path.unlink()
-    if args.provider == "edge":
+    requested_provider, generation_date = resolve_tts_provider(
+        args.provider,
+        generation_date=args.generation_date,
+        alternate_start_date=args.alternate_start_date,
+    )
+    effective_provider = requested_provider
+    audio_probe: dict[str, Any] = {}
+    print(
+        f"TTS provider selected for {generation_date.isoformat()} KST: {requested_provider}",
+        file=sys.stderr,
+    )
+    if requested_provider == "gemini":
+        try:
+            audio_probe = await synthesize_gemini(
+                speech_text,
+                audio_path,
+                api_key=os.getenv("GEMINI_API_KEY", ""),
+                model=args.gemini_model,
+                voice=args.gemini_voice,
+                timeout_seconds=args.gemini_timeout_seconds,
+                ffmpeg_command=args.ffmpeg_command,
+                ffprobe_command=args.ffprobe_command,
+            )
+        except Exception as exc:
+            if args.strict_provider:
+                raise
+            print(f"Gemini TTS fallback to Edge: {exc}", file=sys.stderr)
+            effective_provider = "edge"
+    if effective_provider == "edge":
         await synthesize_edge(speech_text, audio_path, args.voice, args.rate, args.pitch)
+        audio_probe = probe_mp3(audio_path, args.ffprobe_command)
 
     manifest_path = podcast_dir / "manifest.json"
     episode = {
@@ -1022,6 +1341,8 @@ async def build() -> int:
         "audio": f"audio/{episode_id}.mp3",
         "script": f"scripts/{episode_id}.txt",
         "summary": f"../summaries/summary-{episode_id}.md",
+        "tts_provider": effective_provider,
+        "tts_model": args.gemini_model if effective_provider == "gemini" else "edge-tts",
         "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
     update_manifest(manifest_path, episode)
@@ -1033,6 +1354,10 @@ async def build() -> int:
         "script": str(script_path),
         "manifest": str(manifest_path),
         "page_url": page_url(args.site_base_url, episode_id),
+        "generation_date_kst": generation_date.isoformat(),
+        "tts_provider_requested": requested_provider,
+        "tts_provider_used": effective_provider,
+        "audio_probe": audio_probe,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
