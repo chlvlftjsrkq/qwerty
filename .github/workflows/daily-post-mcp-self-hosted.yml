@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       trigger_source:
-        description: "실행 출처 표시용 값입니다. 예: pc-scheduler-0807"
+        description: "실행 출처 표시용 값입니다. 예: pc-scheduler-0737"
         required: false
         default: ""
       agency_index:
@@ -61,7 +61,7 @@ permissions:
 jobs:
   post:
     runs-on: [self-hosted, Windows, X64, kakao, qwerty]
-    timeout-minutes: 30
+    timeout-minutes: 35
     concurrency:
       group: daily-agency-news-kakao-post
       cancel-in-progress: false

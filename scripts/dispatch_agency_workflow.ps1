@@ -14,7 +14,7 @@ param(
     [string]$IncludeWeatherInSummary = "true",
     [string]$ArchiveResults = "true",
     [string]$TargetChatroom = "",
-    [string]$TriggerSource = "pc-scheduler-0807",
+    [string]$TriggerSource = "pc-scheduler-0737",
     [string]$SkipNonBusinessDays = "false",
     [string]$BusinessDate = "",
     [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
