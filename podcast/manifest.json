@@ -1,6 +1,17 @@
 {
   "episodes": [
     {
+      "date": "2026-07-21-병무청",
+      "title": "2026-07-21 병무청 뉴스 브리핑",
+      "description": "네이버 뉴스 기준 병무청 관련 음성 요약",
+      "audio": "audio/2026-07-21-병무청.mp3",
+      "script": "scripts/2026-07-21-병무청.txt",
+      "summary": "../summaries/summary-2026-07-21-병무청.md",
+      "tts_provider": "edge",
+      "tts_model": "edge-tts",
+      "updated_at": "2026-07-22T07:43:00+09:00"
+    },
+    {
       "date": "2026-07-20-병무청",
       "title": "2026-07-20 병무청 뉴스 브리핑",
       "description": "네이버 뉴스 기준 병무청 관련 음성 요약",
