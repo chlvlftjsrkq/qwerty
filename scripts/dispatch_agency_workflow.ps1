@@ -23,6 +23,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-GitHubRunnerPauseFile {
+    if (![string]::IsNullOrWhiteSpace($env:GITHUB_RUNNER_PAUSE_FILE)) {
+        return [Environment]::ExpandEnvironmentVariables($env:GITHUB_RUNNER_PAUSE_FILE.Trim())
+    }
+    return Join-Path $env:LOCALAPPDATA "qwerty\github-actions-runner.pause"
+}
+
+$runnerPauseFile = Get-GitHubRunnerPauseFile
+if (Test-Path -LiteralPath $runnerPauseFile) {
+    Write-Host "GitHub Actions runner dispatch skipped because runner control is off: $runnerPauseFile"
+    exit 0
+}
+
 function Convert-ToWorkflowBool {
     param([string]$Value)
     $normalized = "$Value".Trim().ToLowerInvariant()

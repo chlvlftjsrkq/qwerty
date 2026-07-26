@@ -47,7 +47,7 @@ if (!$SkipDesktopShortcut) {
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $targetPath
     $shortcut.WorkingDirectory = $ProjectRoot
-    $shortcut.Description = "Control qwerty KakaoTalk delivery."
+    $shortcut.Description = "Control qwerty KakaoTalk delivery and GitHub Actions runner."
     $shortcut.IconLocation = "$targetPath,0"
     $shortcut.Save()
 }
@@ -56,4 +56,5 @@ if (!$SkipDesktopShortcut) {
     Executable = $targetPath
     Shortcut = if ($SkipDesktopShortcut) { "" } else { $shortcutPath }
     PauseFile = Join-Path $installDirectory "kakao-delivery.pause"
+    RunnerPauseFile = Join-Path $installDirectory "github-actions-runner.pause"
 }

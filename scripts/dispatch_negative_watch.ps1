@@ -26,6 +26,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-GitHubRunnerPauseFile {
+    if (![string]::IsNullOrWhiteSpace($env:GITHUB_RUNNER_PAUSE_FILE)) {
+        return [Environment]::ExpandEnvironmentVariables($env:GITHUB_RUNNER_PAUSE_FILE.Trim())
+    }
+    return Join-Path $env:LOCALAPPDATA "qwerty\github-actions-runner.pause"
+}
+
+$runnerPauseFile = Get-GitHubRunnerPauseFile
+if (Test-Path -LiteralPath $runnerPauseFile) {
+    Write-Host "GitHub Actions runner dispatch skipped because runner control is off: $runnerPauseFile"
+    exit 0
+}
+
 function Get-DefaultTargetChatroom {
     $codes = @(0x0041, 0x0049, 0x0020, 0xBCD1, 0xBB34, 0xCCAD, 0x0020, 0xB370, 0xC77C, 0xB9AC, 0x0020, 0xBAA8, 0xB2DD, 0xD1A1)
     return -join ($codes | ForEach-Object { [char]$_ })
