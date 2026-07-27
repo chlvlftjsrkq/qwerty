@@ -472,8 +472,12 @@ def _render_codex_summary(
             if not summary and article:
                 summary = _fallback_article_summary(article)
             opinion = _clean_text(model_item.get("opinion"), 100) or (_article_opinion(article, agency_name) if article else "")
-            url = _clean_text(model_item.get("url"), 500) or (article.url if article else "")
-            source = _clean_text(model_item.get("source"), 100) or (article.source if article else "네이버 뉴스")
+            if article:
+                url = article.url
+                source = article.source
+            else:
+                url = _clean_text(model_item.get("url"), 500)
+                source = _clean_text(model_item.get("source"), 100) or "네이버 뉴스"
             try:
                 related_count = max(0, int(model_item.get("related_count") or 0))
             except (TypeError, ValueError):

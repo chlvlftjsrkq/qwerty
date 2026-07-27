@@ -21,6 +21,7 @@ from scripts.filter_articles_by_summary_sources import (
     extract_source_urls,
     filter_articles_by_source_urls,
     filter_articles_by_titles,
+    select_articles_for_summary,
 )
 from kakao_mma_news.summarize import (
     _load_json_object,
@@ -108,6 +109,59 @@ class CoreTests(unittest.TestCase):
             [item["url"] for item in selected],
             ["https://example.com/one", "https://example.com/two"],
         )
+
+    def test_summary_selection_falls_back_by_title_for_each_missing_url(self):
+        articles = [
+            {
+                "title": "[연합뉴스 이 시각 헤드라인] - 10:30",
+                "url": "https://www.yna.co.kr/view/actual?input=1195m",
+                "source": "yna.co.kr",
+            },
+            {
+                "title": "의협, 공보의·군의관 복무기간 단축 국회 국방위에 요청",
+                "url": "https://www.dailypharm.com/user/news/340841?REFERER=NP",
+                "source": "dailypharm.com",
+            },
+        ]
+        summary = "\n".join(
+            [
+                "1️⃣ [연합뉴스 이 시각 헤드라인] - 10:30",
+                "Source: https://www.yna.co.kr/view/different?input=1195m",
+                "2️⃣ 의협, 공보의·군의관 복무기간 단축 국회 국방위에 요청",
+                "Source: https://www.dailypharm.com/user/news/340841?REFERER=NP",
+            ]
+        )
+
+        selected, stats = select_articles_for_summary(articles, summary)
+
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(selected[0]["url"], "https://www.yna.co.kr/view/actual?input=1195m")
+        self.assertEqual(selected[0]["summary_index"], 1)
+        self.assertEqual(selected[1]["summary_index"], 2)
+        self.assertEqual(stats["matched_by_title"], 1)
+        self.assertEqual(stats["matched_by_url"], 1)
+
+    def test_summary_selection_synthesizes_missing_slot(self):
+        articles = [
+            {"title": "첫 기사", "url": "https://example.com/one", "source": "example.com"},
+        ]
+        summary = "\n".join(
+            [
+                "1️⃣ 첫 기사",
+                "Source: https://example.com/one",
+                "2️⃣ 수집 목록에 없는 기사",
+                "Source: https://missing.example.com/two",
+            ]
+        )
+
+        selected, stats = select_articles_for_summary(articles, summary)
+
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(selected[1]["title"], "수집 목록에 없는 기사")
+        self.assertEqual(selected[1]["url"], "https://missing.example.com/two")
+        self.assertEqual(selected[1]["origin"], "summary_source")
+        self.assertEqual(selected[1]["summary_index"], 2)
+        self.assertEqual(stats["synthesized"], 1)
 
     def test_strip_html(self):
         self.assertEqual(strip_html("<b>병무청</b>&nbsp;뉴스<br>요약"), "병무청 뉴스 요약")
@@ -216,6 +270,35 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("Source: example.com / https://example.com/news", summary)
         self.assertNotIn("네이버 뉴스 기준으로 확인한", summary)
         self.assertNotIn("말줄임표", summary)
+
+    def test_codex_render_uses_collected_source_url_for_selected_article(self):
+        article = Article(
+            "[연합뉴스 이 시각 헤드라인] - 10:30",
+            "https://www.yna.co.kr/view/actual?input=1195m",
+            "yna.co.kr",
+            datetime(2026, 7, 26, tzinfo=timezone.utc),
+            "병무청 관련 주요 소식입니다.",
+            "test",
+        )
+        data = {
+            "items": [
+                {
+                    "no": "1",
+                    "title": article.title,
+                    "summary": "병무청 관련 주요 소식을 전했습니다.",
+                    "opinion": "관련 정책 내용을 확인할 필요가 있습니다.",
+                    "source": "wrong.example.com",
+                    "url": "https://www.yna.co.kr/view/wrong?input=1195m",
+                },
+            ],
+            "excluded_note": "",
+            "one_line": "병무청 관련 소식이 이어졌습니다.",
+        }
+
+        summary = _render_codex_summary(article.published_date_kst, data, [article], "병무청")
+
+        self.assertIn("Source: https://www.yna.co.kr/view/actual?input=1195m", summary)
+        self.assertNotIn("https://www.yna.co.kr/view/wrong", summary)
 
     def test_codex_render_dedupes_same_news_topic(self):
         article = Article(
