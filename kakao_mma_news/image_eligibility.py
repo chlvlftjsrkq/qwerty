@@ -38,6 +38,7 @@ class ImageProbe:
     width: int = 0
     height: int = 0
     reason: str = ""
+    page_title: str = ""
 
     @property
     def eligible(self) -> bool:
@@ -65,6 +66,22 @@ def _meta_image_url(page_url: str, html: str) -> str:
         content = str(tag.get("content", "")).strip() if tag else ""
         if content:
             return urljoin(page_url, content)
+    return ""
+
+
+def _meta_page_title(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    selectors = (
+        ("property", "og:title"),
+        ("name", "twitter:title"),
+    )
+    for key, value in selectors:
+        tag = soup.find("meta", attrs={key: value})
+        content = str(tag.get("content", "")).strip().lstrip("\ufeff") if tag else ""
+        if content:
+            return re.sub(r"\s+", " ", content).strip()
+    if soup.title and soup.title.string:
+        return re.sub(r"\s+", " ", soup.title.string).strip().lstrip("\ufeff")
     return ""
 
 
@@ -96,9 +113,10 @@ def probe_article_image(page_url: str, timeout: float = 6.0) -> ImageProbe:
     try:
         page_response = requests.get(page_url, timeout=timeout, headers=headers)
         page_response.raise_for_status()
+        page_title = _meta_page_title(page_response.text)
         image_url = _meta_image_url(page_url, page_response.text)
         if not image_url:
-            return ImageProbe(reason="missing representative image metadata")
+            return ImageProbe(reason="missing representative image metadata", page_title=page_title)
 
         image_headers = {
             "User-Agent": USER_AGENT,
@@ -115,6 +133,7 @@ def probe_article_image(page_url: str, timeout: float = 6.0) -> ImageProbe:
                 width=width,
                 height=height,
                 reason=quality_reason,
+                page_title=page_title,
             )
         if width * height < 90_000 or max(width, height) < 320 or min(width, height) < 160:
             return ImageProbe(
@@ -122,8 +141,9 @@ def probe_article_image(page_url: str, timeout: float = 6.0) -> ImageProbe:
                 width=width,
                 height=height,
                 reason="representative image is too small",
+                page_title=page_title,
             )
-        return ImageProbe(image_url=image_url, width=width, height=height)
+        return ImageProbe(image_url=image_url, width=width, height=height, page_title=page_title)
     except Exception as exc:
         return ImageProbe(reason=f"{type(exc).__name__}: {exc}")
 
@@ -167,7 +187,13 @@ def filter_image_eligible_articles(
         if not result.eligible:
             stats["image_excluded"] += 1
             continue
-        eligible.append(replace(article, image_url=result.image_url))
+        eligible.append(
+            replace(
+                article,
+                title=result.page_title or article.title.lstrip("\ufeff"),
+                image_url=result.image_url,
+            )
+        )
 
     stats["eligible"] = len(eligible)
     return eligible, stats

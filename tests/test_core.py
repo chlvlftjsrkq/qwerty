@@ -106,7 +106,12 @@ class CoreTests(unittest.TestCase):
 
         def probe(url: str, _timeout: float) -> ImageProbe:
             if url.endswith("/eligible"):
-                return ImageProbe("https://cdn.example.com/photo.jpg", 1200, 800)
+                return ImageProbe(
+                    "https://cdn.example.com/photo.jpg",
+                    1200,
+                    800,
+                    page_title="구체적인 병무청 정책 기사 전체 제목",
+                )
             return ImageProbe(reason="missing representative image metadata")
 
         selected, stats = filter_image_eligible_articles(
@@ -115,7 +120,7 @@ class CoreTests(unittest.TestCase):
             probe=probe,
         )
 
-        self.assertEqual([item.title for item in selected], ["구체적인 병무청 정책 기사"])
+        self.assertEqual([item.title for item in selected], ["구체적인 병무청 정책 기사 전체 제목"])
         self.assertEqual(selected[0].image_url, "https://cdn.example.com/photo.jpg")
         self.assertEqual(stats["eligible"], 1)
         self.assertEqual(stats["image_excluded"], 1)
