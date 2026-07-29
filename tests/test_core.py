@@ -10,6 +10,7 @@ from unittest.mock import patch
 from kakao_mma_news.image_eligibility import (
     ImageProbe,
     filter_image_eligible_articles,
+    representative_image_reason,
     roundup_reason,
 )
 from kakao_mma_news.kakao import split_message
@@ -118,6 +119,24 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(selected[0].image_url, "https://cdn.example.com/photo.jpg")
         self.assertEqual(stats["eligible"], 1)
         self.assertEqual(stats["image_excluded"], 1)
+
+    def test_representative_image_quality_rejects_logos_and_blank_images(self):
+        from PIL import Image
+
+        photo = Image.new("RGB", (640, 360), (25, 35, 45))
+        for x in range(320, 640):
+            for y in range(360):
+                photo.putpixel((x, y), (230, 220, 210))
+
+        self.assertEqual(
+            representative_image_reason("https://example.com/meta_logo.jpg", photo),
+            "generic site logo or default image",
+        )
+        self.assertEqual(
+            representative_image_reason("https://example.com/photo.jpg", Image.new("RGB", (640, 360), "black")),
+            "blank or near-solid representative image",
+        )
+        self.assertEqual(representative_image_reason("https://example.com/photo.jpg", photo), "")
 
     def test_filter_articles_by_summary_sources(self):
         articles = [

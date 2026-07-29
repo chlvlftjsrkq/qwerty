@@ -8,7 +8,7 @@ from typing import Callable
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
-from PIL import Image
+from PIL import Image, ImageOps, ImageStat
 
 from .news import Article
 
@@ -20,6 +20,15 @@ ROUNDUP_TITLE_PATTERNS = (
     re.compile(r"(?:뉴스|이슈)\s*(?:브리핑|클리핑|모음)", re.IGNORECASE),
     re.compile(r"(?:주요\s*)?헤드라인\s*(?:뉴스)?", re.IGNORECASE),
     re.compile(r"한\s*눈에\s*(?:보는|읽는)?\s*(?:뉴스|이슈)", re.IGNORECASE),
+)
+GENERIC_IMAGE_URL_MARKERS = (
+    "default_image",
+    "defaultimage",
+    "favicon",
+    "meta_logo",
+    "no_image",
+    "noimage",
+    "snslogo",
 )
 
 
@@ -59,6 +68,21 @@ def _meta_image_url(page_url: str, html: str) -> str:
     return ""
 
 
+def representative_image_reason(image_url: str, image: Image.Image) -> str:
+    normalized_url = image_url.casefold()
+    if any(marker in normalized_url for marker in GENERIC_IMAGE_URL_MARKERS):
+        return "generic site logo or default image"
+
+    sample = ImageOps.exif_transpose(image).convert("RGB")
+    sample.thumbnail((96, 96), Image.Resampling.LANCZOS)
+    grayscale = ImageOps.grayscale(sample)
+    minimum, maximum = grayscale.getextrema()
+    deviation = ImageStat.Stat(grayscale).stddev[0]
+    if maximum - minimum < 12 or deviation < 4:
+        return "blank or near-solid representative image"
+    return ""
+
+
 def probe_article_image(page_url: str, timeout: float = 6.0) -> ImageProbe:
     if not page_url:
         return ImageProbe(reason="missing article URL")
@@ -84,6 +108,14 @@ def probe_article_image(page_url: str, timeout: float = 6.0) -> ImageProbe:
         image_response.raise_for_status()
         with Image.open(BytesIO(image_response.content)) as image:
             width, height = image.size
+            quality_reason = representative_image_reason(image_url, image)
+        if quality_reason:
+            return ImageProbe(
+                image_url=image_url,
+                width=width,
+                height=height,
+                reason=quality_reason,
+            )
         if width * height < 90_000 or max(width, height) < 320 or min(width, height) < 160:
             return ImageProbe(
                 image_url=image_url,
