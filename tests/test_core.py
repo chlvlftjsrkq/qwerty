@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from kakao_mma_news.image_eligibility import (
     ImageProbe,
+    _meta_page_title,
     filter_image_eligible_articles,
     representative_image_reason,
     roundup_reason,
@@ -142,6 +143,11 @@ class CoreTests(unittest.TestCase):
             "blank or near-solid representative image",
         )
         self.assertEqual(representative_image_reason("https://example.com/photo.jpg", photo), "")
+
+    def test_article_page_title_decodes_nested_html_entities(self):
+        page = '<meta property="og:title" content="&amp;lsquo;예비전력 정예화&amp;rsquo; 훈련체계">'
+
+        self.assertEqual(_meta_page_title(page), "‘예비전력 정예화’ 훈련체계")
 
     def test_filter_articles_by_summary_sources(self):
         articles = [

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_module
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
@@ -71,17 +72,27 @@ def _meta_image_url(page_url: str, html: str) -> str:
 
 def _meta_page_title(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
+
+    def clean(value: str) -> str:
+        decoded = value
+        for _ in range(3):
+            updated = html_module.unescape(decoded)
+            if updated == decoded:
+                break
+            decoded = updated
+        return re.sub(r"\s+", " ", decoded).strip().lstrip("\ufeff")
+
     selectors = (
         ("property", "og:title"),
         ("name", "twitter:title"),
     )
     for key, value in selectors:
         tag = soup.find("meta", attrs={key: value})
-        content = str(tag.get("content", "")).strip().lstrip("\ufeff") if tag else ""
+        content = clean(str(tag.get("content", ""))) if tag else ""
         if content:
-            return re.sub(r"\s+", " ", content).strip()
+            return content
     if soup.title and soup.title.string:
-        return re.sub(r"\s+", " ", soup.title.string).strip().lstrip("\ufeff")
+        return clean(soup.title.string)
     return ""
 
 
