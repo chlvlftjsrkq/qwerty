@@ -267,7 +267,10 @@ jobs:
             "--date", "$env:TARGET_DATE_RESOLVED",
             "--start-date", "$env:TARGET_START_DATE_RESOLVED",
             "--articles-output", "$articlesPath",
-            "--output", "$summaryPath"
+            "--output", "$summaryPath",
+            "--require-article-images",
+            "--image-probe-timeout", "6",
+            "--image-probe-workers", "12"
           )
           & $env:PYTHON_EXE @argsList
 
@@ -285,7 +288,7 @@ jobs:
             throw "No summary Markdown file found: $summaryPath"
           }
           & $env:PYTHON_EXE scripts/filter_articles_by_summary_sources.py --articles "$articlesPath" --summary "$summaryPath" --output "$selectedArticlesPath"
-          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$selectedArticlesPath" --output "$imagePath" --date "$env:DATE_LABEL" --agency "$env:AGENCY_NAME" --limit 10
+          & $env:PYTHON_EXE scripts/build_news_image_sheet.py --articles "$selectedArticlesPath" --output "$imagePath" --date "$env:DATE_LABEL" --agency "$env:AGENCY_NAME" --limit 10 --require-images
 
       - name: Build podcast audio
         shell: powershell

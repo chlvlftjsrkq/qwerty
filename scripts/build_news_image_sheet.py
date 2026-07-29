@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -44,6 +45,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--title", default="", help="Optional custom title for the image sheet")
     parser.add_argument("--limit", type=int, default=10, help="Maximum articles/images")
     parser.add_argument("--timeout", type=float, default=12.0, help="HTTP timeout in seconds")
+    parser.add_argument(
+        "--require-images",
+        action="store_true",
+        help="Fail instead of drawing a placeholder when a representative image cannot be downloaded",
+    )
     return parser.parse_args()
 
 
@@ -138,20 +144,29 @@ def image_meta_url(page_url: str, timeout: float) -> str:
 
 
 def download_image(image_url: str, output_path: Path, timeout: float) -> str:
-    response = requests.get(
-        image_url,
-        timeout=timeout,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Referer": f"{urlparse(image_url).scheme}://{urlparse(image_url).netloc}/",
-        },
-    )
-    response.raise_for_status()
-    image = Image.open(BytesIO(response.content))
-    image = ImageOps.exif_transpose(image).convert("RGB")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output_path, quality=92)
-    return str(output_path)
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            response = requests.get(
+                image_url,
+                timeout=timeout,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Referer": f"{urlparse(image_url).scheme}://{urlparse(image_url).netloc}/",
+                },
+            )
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content))
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(output_path, quality=92)
+            return str(output_path)
+        except Exception as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(float(attempt))
+    assert last_error is not None
+    raise last_error
 
 
 def placeholder_image(index: int, title: str, size: tuple[int, int]) -> Image.Image:
@@ -203,9 +218,11 @@ def collect_records(articles: list[dict[str, Any]], asset_dir: Path, limit: int,
         title = normalize_space(str(article.get("title") or f"기사 {index}"))
         source = normalize_space(str(article.get("source") or "네이버 뉴스"))
         url = normalize_space(str(article.get("url") or ""))
-        record = ImageRecord(index=index, title=title, source=source, url=url, image_url="", image_path="")
+        image_hint = normalize_space(str(article.get("image_url") or ""))
+        record = ImageRecord(index=index, title=title, source=source, url=url, image_url=image_hint, image_path="")
         try:
-            record.image_url = image_meta_url(url, timeout)
+            if not record.image_url:
+                record.image_url = image_meta_url(url, timeout)
             if record.image_url:
                 suffix = Path(urlparse(record.image_url).path).suffix.lower()
                 if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
@@ -316,6 +333,11 @@ def main() -> int:
         ]
 
     records = collect_records(selected, asset_dir, args.limit, args.timeout)
+    if args.require_images:
+        missing = [record for record in records if not record.image_path]
+        if missing:
+            details = "; ".join(f"{record.index}: {record.error}" for record in missing)
+            raise RuntimeError(f"Representative image validation failed: {details}")
     build_sheet(records, output_path, args.date, args.agency, args.title)
     report_path = output_path.with_suffix(".json")
     report_path.write_text(json.dumps([record.__dict__ for record in records], ensure_ascii=False, indent=2), encoding="utf-8")

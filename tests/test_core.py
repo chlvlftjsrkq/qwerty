@@ -7,6 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from kakao_mma_news.image_eligibility import (
+    ImageProbe,
+    filter_image_eligible_articles,
+    roundup_reason,
+)
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.news import (
     Article,
@@ -66,6 +71,54 @@ from scripts.watch_negative_news import (
 
 
 class CoreTests(unittest.TestCase):
+    def test_roundup_articles_are_not_representative_candidates(self):
+        article = Article(
+            "[연합뉴스 이 시각 헤드라인] - 10:30",
+            "https://example.com/headlines",
+            "example.com",
+            datetime.now(timezone.utc),
+            "서로 다른 여러 소식을 모았습니다.",
+            "test",
+        )
+
+        self.assertTrue(roundup_reason(article))
+
+    def test_image_eligibility_preserves_order_and_verified_url(self):
+        articles = [
+            Article(
+                "구체적인 병무청 정책 기사",
+                "https://example.com/eligible",
+                "example.com",
+                datetime.now(timezone.utc),
+                "병무청이 새로운 정책을 안내했습니다.",
+                "test",
+            ),
+            Article(
+                "대표 이미지 없는 기사",
+                "https://example.com/no-image",
+                "example.com",
+                datetime.now(timezone.utc),
+                "병무청 관련 소식입니다.",
+                "test",
+            ),
+        ]
+
+        def probe(url: str, _timeout: float) -> ImageProbe:
+            if url.endswith("/eligible"):
+                return ImageProbe("https://cdn.example.com/photo.jpg", 1200, 800)
+            return ImageProbe(reason="missing representative image metadata")
+
+        selected, stats = filter_image_eligible_articles(
+            articles,
+            max_workers=2,
+            probe=probe,
+        )
+
+        self.assertEqual([item.title for item in selected], ["구체적인 병무청 정책 기사"])
+        self.assertEqual(selected[0].image_url, "https://cdn.example.com/photo.jpg")
+        self.assertEqual(stats["eligible"], 1)
+        self.assertEqual(stats["image_excluded"], 1)
+
     def test_filter_articles_by_summary_sources(self):
         articles = [
             {"title": "excluded", "url": "https://example.com/excluded", "source": "example.com"},

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--post", action="store_true", help="PC 카카오톡 단톡방에 게시")
     parser.add_argument("--dry-run", action="store_true", help="게시하지 않고 수집/요약만 수행")
     parser.add_argument("--fetch-pages", action="store_true", help="기사 본문 일부를 추가 수집")
+    parser.add_argument(
+        "--require-article-images",
+        action="store_true",
+        help="종합 기사와 대표 이미지가 확인되지 않은 기사를 요약 후보에서 제외",
+    )
+    parser.add_argument("--image-probe-timeout", type=float, default=6.0)
+    parser.add_argument("--image-probe-workers", type=int, default=12)
     return parser.parse_args()
 
 
@@ -56,6 +64,17 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     articles = collect_articles(config, target_date, start_date=start_date)
+    if args.require_article_images:
+        from .image_eligibility import filter_image_eligible_articles
+
+        articles, image_stats = filter_image_eligible_articles(
+            articles,
+            timeout=max(1.0, args.image_probe_timeout),
+            max_workers=max(1, args.image_probe_workers),
+        )
+        print("대표기사 이미지 사전점검:", json.dumps(image_stats, ensure_ascii=False))
+        if not articles:
+            raise RuntimeError("종합 기사가 아니면서 대표 이미지가 확인된 뉴스가 없습니다.")
     articles_path = Path(args.articles_output) if args.articles_output else output_dir / f"articles-{file_date_label(start_date, target_date)}.json"
     save_articles(articles_path, articles)
 

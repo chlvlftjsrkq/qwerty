@@ -104,6 +104,7 @@ class Article:
     summary: str
     origin: str
     content: str = ""
+    image_url: str = ""
 
     @property
     def published_date_kst(self) -> date | None:
