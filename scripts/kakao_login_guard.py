@@ -278,19 +278,20 @@ def ensure_chat_tab(wait_seconds: float = 0.5) -> bool:
     if _is_chat_room_list_visible(main_hwnd):
         return True
 
+    left, top, _right, _bottom = win32gui.GetWindowRect(main_hwnd)
+    # Current KakaoTalk builds do not consistently honor Ctrl+2. Click the chat
+    # sidebar area first, then retry around it in case display scaling changed.
+    for _attempt in range(2):
+        _bring_to_front(main_hwnd)
+        for offset_y in (105, 95, 115, 125, 135):
+            pyautogui.click(left + 32, top + offset_y)
+            time.sleep(wait_seconds)
+            if _is_chat_room_list_visible(main_hwnd):
+                return True
+
     _bring_to_front(main_hwnd)
     pyautogui.hotkey("ctrl", "2")
     time.sleep(wait_seconds)
-    if _is_chat_room_list_visible(main_hwnd):
-        return True
-
-    left, top, _right, _bottom = win32gui.GetWindowRect(main_hwnd)
-    # Try likely KakaoTalk sidebar positions; stop as soon as ChatRoomListView is visible.
-    for offset_y in (95, 125, 155, 185, 215):
-        pyautogui.click(left + 32, top + offset_y)
-        time.sleep(wait_seconds)
-        if _is_chat_room_list_visible(main_hwnd):
-            return True
     return _is_chat_room_list_visible(main_hwnd)
 
 

@@ -16,7 +16,7 @@ import pyautogui
 import pyperclip
 from kakao_mcp import controller
 from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
-from kakao_login_guard import ensure_kakao_ready
+from kakao_login_guard import ensure_chat_tab, ensure_kakao_ready
 
 pyautogui.FAILSAFE = False
 
@@ -72,10 +72,12 @@ def bring_room_to_front(
     open_result = {}
     hwnd = None
     for attempt in range(1, max(1, attempts) + 1):
+        ensure_chat_tab(wait_seconds=max(0.5, wait))
         open_result = controller.search_and_open_room(room)
         time.sleep(wait)
         hwnd = controller.find_chat_window(room)
         if not hwnd:
+            ensure_chat_tab(wait_seconds=max(0.5, wait))
             pyautogui.hotkey("ctrl", "f")
             time.sleep(0.5)
             pyperclip.copy(room)

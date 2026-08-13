@@ -309,6 +309,68 @@ namespace Qwerty.KakaoDeliveryControl
         }
     }
 
+    internal sealed class BriefingDispatchResult
+    {
+        internal int ExitCode;
+        internal string Output;
+    }
+
+    internal static class BriefingDispatch
+    {
+        private static string ProjectRoot
+        {
+            get
+            {
+                string configured = Environment.GetEnvironmentVariable("QWERTY_PROJECT_ROOT");
+                if (!string.IsNullOrWhiteSpace(configured))
+                {
+                    return Environment.ExpandEnvironmentVariables(configured.Trim());
+                }
+                return @"C:\omx\qwerty";
+            }
+        }
+
+        internal static BriefingDispatchResult Run()
+        {
+            string scriptPath = Path.Combine(ProjectRoot, "scripts", "dispatch_today_bma_briefing.ps1");
+            if (!File.Exists(scriptPath))
+            {
+                throw new FileNotFoundException("오늘 브리핑 실행 파일을 찾지 못했습니다.", scriptPath);
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + scriptPath + "\"",
+                WorkingDirectory = ProjectRoot,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+
+            using (Process process = Process.Start(startInfo))
+            {
+                if (process == null)
+                {
+                    throw new InvalidOperationException("오늘 브리핑 작업을 시작하지 못했습니다.");
+                }
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                string detail = string.IsNullOrWhiteSpace(error) ? output : error;
+                return new BriefingDispatchResult
+                {
+                    ExitCode = process.ExitCode,
+                    Output = detail.Trim()
+                };
+            }
+        }
+    }
+
     internal sealed class ControlForm : Form
     {
         private readonly Label deliveryStatusLabel;
@@ -319,12 +381,14 @@ namespace Qwerty.KakaoDeliveryControl
         private readonly Button runnerCheckButton;
         private readonly Button runnerStartButton;
         private readonly Button runnerStopButton;
+        private readonly Label briefingStatusLabel;
+        private readonly Button briefingSendButton;
         private readonly System.Windows.Forms.Timer refreshTimer;
 
         internal ControlForm()
         {
             Text = "qwerty 자동화 제어";
-            ClientSize = new Size(570, 505);
+            ClientSize = new Size(570, 660);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -387,9 +451,47 @@ namespace Qwerty.KakaoDeliveryControl
             deliveryGroup.Controls.Add(pauseButton);
             deliveryGroup.Controls.Add(resumeButton);
 
-            var runnerGroup = new GroupBox
+            var briefingGroup = new GroupBox
             {
                 Location = new Point(20, 252),
+                Size = new Size(530, 135),
+                Text = "오늘 병무청 브리핑"
+            };
+
+            var briefingDescriptionLabel = new Label
+            {
+                AutoSize = false,
+                Location = new Point(18, 29),
+                Size = new Size(305, 55),
+                ForeColor = Color.FromArgb(75, 75, 75),
+                Text = "아침 예약을 놓쳤을 때 오늘 브리핑을 새로 생성해 이미지, 본문, 음성 링크를 모닝톡방에 보냅니다."
+            };
+
+            briefingSendButton = new Button
+            {
+                Location = new Point(330, 31),
+                Size = new Size(180, 52),
+                Text = "오늘 브리핑 보내기",
+                UseVisualStyleBackColor = true
+            };
+            briefingSendButton.Click += BriefingSendButtonClick;
+
+            briefingStatusLabel = new Label
+            {
+                AutoSize = false,
+                Location = new Point(18, 94),
+                Size = new Size(490, 25),
+                ForeColor = Color.FromArgb(75, 75, 75),
+                Text = "상태: 대기 중"
+            };
+
+            briefingGroup.Controls.Add(briefingDescriptionLabel);
+            briefingGroup.Controls.Add(briefingSendButton);
+            briefingGroup.Controls.Add(briefingStatusLabel);
+
+            var runnerGroup = new GroupBox
+            {
+                Location = new Point(20, 401),
                 Size = new Size(530, 225),
                 Text = "GitHub Actions 러너"
             };
@@ -445,6 +547,7 @@ namespace Qwerty.KakaoDeliveryControl
 
             Controls.Add(titleLabel);
             Controls.Add(deliveryGroup);
+            Controls.Add(briefingGroup);
             Controls.Add(runnerGroup);
 
             refreshTimer = new System.Windows.Forms.Timer();
@@ -506,6 +609,82 @@ namespace Qwerty.KakaoDeliveryControl
             }
             message += RunnerState.TaskExists ? "\r\n자동 시작 예약도 등록되어 있습니다." : "\r\n자동 시작 예약을 찾지 못했습니다.";
             MessageBox.Show(this, message, "GitHub Actions 상태 점검", MessageBoxButtons.OK, RunnerState.IsRunning ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
+        private void BriefingSendButtonClick(object sender, EventArgs e)
+        {
+            if (DeliveryState.IsPaused)
+            {
+                MessageBox.Show(this, "카카오톡 자동발송이 꺼져 있습니다. 전송 켜기를 누른 뒤 다시 시도해 주세요.", "브리핑 발송 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                if (RunnerState.IsPaused || !RunnerState.IsRunning)
+                {
+                    RunnerState.Resume();
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError(ex, "브리핑 실행 준비 오류");
+                return;
+            }
+
+            DialogResult answer = MessageBox.Show(
+                this,
+                "오늘 병무청 브리핑을 새로 생성해 모닝톡방으로 보내시겠습니까?\r\n이미지, 본문, 음성요약 링크가 함께 생성됩니다.",
+                "오늘 브리핑 보내기",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button1);
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+
+            briefingSendButton.Enabled = false;
+            briefingStatusLabel.Text = "상태: GitHub에 생성·발송 요청 중";
+            briefingStatusLabel.ForeColor = Color.FromArgb(190, 95, 35);
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                BriefingDispatchResult result = null;
+                Exception failure = null;
+                try
+                {
+                    result = BriefingDispatch.Run();
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
+
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    briefingSendButton.Enabled = true;
+                    if (failure != null)
+                    {
+                        briefingStatusLabel.Text = "상태: 요청 실패";
+                        briefingStatusLabel.ForeColor = Color.FromArgb(190, 60, 45);
+                        ShowError(failure, "오늘 브리핑 요청 오류");
+                        return;
+                    }
+                    if (result == null || result.ExitCode != 0)
+                    {
+                        briefingStatusLabel.Text = "상태: 요청 실패";
+                        briefingStatusLabel.ForeColor = Color.FromArgb(190, 60, 45);
+                        string detail = result == null ? "알 수 없는 오류입니다." : result.Output;
+                        MessageBox.Show(this, "오늘 브리핑을 요청하지 못했습니다.\r\n\r\n" + detail, "오늘 브리핑 요청 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    briefingStatusLabel.Text = "상태: 생성·발송 작업 요청 완료";
+                    briefingStatusLabel.ForeColor = Color.FromArgb(35, 130, 75);
+                    MessageBox.Show(this, "오늘 병무청 브리핑 생성을 시작했습니다. 완료되면 이미지, 본문, 음성요약 링크가 모닝톡방에 도착합니다.", "오늘 브리핑 요청 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                });
+            });
         }
 
         private void RunnerStartButtonClick(object sender, EventArgs e)
