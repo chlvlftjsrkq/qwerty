@@ -3,7 +3,8 @@ param(
     [string]$Repo = "chlvlftjsrkq/qwerty",
     [string]$Workflow = "daily-post-mcp-self-hosted.yml",
     [string]$Ref = "main",
-    [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe"
+    [string]$GhExe = "C:\Program Files\GitHub CLI\gh.exe",
+    [string]$PythonExe = "C:\Users\April\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +61,18 @@ try {
     }
 
     $today = (Get-Date).ToString("yyyy-MM-dd")
+    $businessDayScript = Join-Path $ProjectRoot "scripts\is_korean_business_day.py"
+    if (!(Test-Path -LiteralPath $PythonExe) -or !(Test-Path -LiteralPath $businessDayScript)) {
+        throw "The business-day checker is not available."
+    }
+    & $PythonExe $businessDayScript --date $today --json | Out-Null
+    if ($LASTEXITCODE -eq 2) {
+        throw "Today is not a scheduled briefing day. Use the next business-day briefing to include skipped dates."
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not verify whether today is a scheduled briefing day."
+    }
+
     $agencyName = -join (@(0xBCD1, 0xBB34, 0xCCAD) | ForEach-Object { [char]$_ })
     & $dispatchScript `
         -Repo $Repo `
