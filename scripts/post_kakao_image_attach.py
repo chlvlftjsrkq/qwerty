@@ -69,9 +69,20 @@ def bring_room_to_front(
     attempts: int,
     retry_wait: float,
 ) -> tuple[int, tuple[int, int, int, int], dict]:
-    open_result = {}
-    hwnd = None
+    hwnd = controller.find_chat_window(room)
+    open_result = (
+        {
+            "success": True,
+            "message": f"Chat room '{room}' is already open",
+            "hwnd": int(hwnd),
+            "already_open": True,
+        }
+        if hwnd
+        else {}
+    )
     for attempt in range(1, max(1, attempts) + 1):
+        if hwnd:
+            break
         ensure_chat_tab(wait_seconds=max(0.5, wait))
         open_result = controller.search_and_open_room(room)
         time.sleep(wait)
@@ -125,7 +136,11 @@ def attach_image(
     if not image_path.exists():
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
-    guard_result = ensure_kakao_ready(room=room, wait_seconds=max(15.0, open_wait * max(1, open_attempts)))
+    guard_result = ensure_kakao_ready(
+        room=room,
+        wait_seconds=max(15.0, open_wait * max(1, open_attempts)),
+        open_room=False,
+    )
     print(json.dumps({"kakao_login_guard": guard_result}, ensure_ascii=False))
 
     if is_kakao_delivery_paused():

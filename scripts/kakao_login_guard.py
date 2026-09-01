@@ -295,24 +295,48 @@ def ensure_chat_tab(wait_seconds: float = 0.5) -> bool:
     return _is_chat_room_list_visible(main_hwnd)
 
 
+def find_open_room(room: str) -> dict[str, Any] | None:
+    if controller is None:
+        return None
+    hwnd = controller.find_chat_window(room)
+    if hwnd is None:
+        return None
+    return {
+        "success": True,
+        "message": f"Chat room '{room}' is already open",
+        "hwnd": int(hwnd),
+        "already_open": True,
+    }
+
+
 def try_open_room(room: str) -> dict[str, Any]:
     if controller is None:
         return {"error": "kakao_mcp controller is not available"}
+    open_room = find_open_room(room)
+    if open_room is not None:
+        return open_room
     result = controller.search_and_open_room(room)
     return result
 
 
-def ensure_kakao_ready(room: str = "", wait_seconds: float = 15.0) -> dict[str, Any]:
+def ensure_kakao_ready(
+    room: str = "",
+    wait_seconds: float = 15.0,
+    open_room: bool = True,
+) -> dict[str, Any]:
     launch_kakao_if_needed()
     before_login_window = find_login_window() is not None
     login_result = login_with_stored_password(wait_seconds=wait_seconds) if before_login_window else {
         "login_needed": False,
         "login_attempted": False,
     }
-    chat_tab_ready = ensure_chat_tab()
 
-    room_result: dict[str, Any] | None = None
-    if room:
+    room_result = find_open_room(room) if room else None
+    chat_tab_ready = False
+    if room_result is None:
+        chat_tab_ready = ensure_chat_tab()
+
+    if room and room_result is None and open_room:
         room_result = try_open_room(room)
         if room_result.get("success") is not True and chat_tab_ready is False:
             chat_tab_ready = ensure_chat_tab()
@@ -324,6 +348,7 @@ def ensure_kakao_ready(room: str = "", wait_seconds: float = 15.0) -> dict[str, 
         "chat_tab_ready": chat_tab_ready,
         "room": room,
         "room_result": room_result,
+        "room_open_requested": open_room,
     }
 
 

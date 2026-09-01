@@ -442,6 +442,7 @@ jobs:
           & $env:PYTHON_EXE scripts/post_kakao_image_attach.py --room "$env:TARGET_CHATROOM" --image "$imagePath" --screenshot "$screenshotPath" --send-wait 8
 
       - name: Post summary to KakaoTalk
+        timeout-minutes: 3
         if: ${{ github.event.inputs.send_summary == 'true' }}
         shell: powershell
         env:
@@ -461,6 +462,7 @@ jobs:
           & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand"
 
       - name: Post podcast link to KakaoTalk
+        timeout-minutes: 3
         if: ${{ github.event.inputs.send_podcast == 'true' }}
         shell: powershell
         env:
