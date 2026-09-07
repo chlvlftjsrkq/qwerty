@@ -461,6 +461,26 @@ jobs:
           }
           & $env:PYTHON_EXE scripts/post_summary_mcp.py --room "$env:TARGET_CHATROOM" --summary "$summaryPath" --mcp-command "$mcpCommand"
 
+      - name: Publish briefing notice and audio comment
+        timeout-minutes: 3
+        if: ${{ github.event.inputs.send_summary == 'true' && github.event.inputs.send_podcast == 'true' }}
+        shell: powershell
+        env:
+          TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_CHATROOM)) {
+            throw "Repository variable TARGET_CHATROOM is required."
+          }
+          $summaryPath = Join-Path "runs" "summary-$env:EPISODE_ID.md"
+          $podcastMessagePath = Join-Path "runs" "podcast-message-$env:EPISODE_ID.txt"
+          if (!(Test-Path $summaryPath)) {
+            throw "No summary Markdown file found: $summaryPath"
+          }
+          if (!(Test-Path $podcastMessagePath)) {
+            throw "No podcast message file found: $podcastMessagePath"
+          }
+          & $env:PYTHON_EXE scripts/publish_kakao_notice.py publish --room "$env:TARGET_CHATROOM" --notice-file "$summaryPath" --comment-file "$podcastMessagePath"
+
       - name: Post podcast link to KakaoTalk
         timeout-minutes: 3
         if: ${{ github.event.inputs.send_podcast == 'true' }}
