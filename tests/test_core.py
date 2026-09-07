@@ -43,6 +43,7 @@ from kakao_mma_news.summarize import (
 )
 from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import (
+    DEFAULT_TTS_PROVIDER,
     format_spoken_date,
     markdown_to_speech,
     normalize_gemini_api_key,
@@ -73,6 +74,11 @@ from scripts.watch_negative_news import (
 
 
 class CoreTests(unittest.TestCase):
+    def test_gemini_is_the_default_tts_provider_every_day(self):
+        self.assertEqual("gemini", DEFAULT_TTS_PROVIDER)
+        self.assertEqual("gemini", resolve_tts_provider(DEFAULT_TTS_PROVIDER, "2026-09-07")[0])
+        self.assertEqual("gemini", resolve_tts_provider(DEFAULT_TTS_PROVIDER, "2026-09-08")[0])
+
     def test_roundup_articles_are_not_representative_candidates(self):
         article = Article(
             "[연합뉴스 이 시각 헤드라인] - 10:30",

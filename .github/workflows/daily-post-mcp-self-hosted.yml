@@ -293,7 +293,7 @@ jobs:
       - name: Build podcast audio
         shell: powershell
         env:
-          TTS_PROVIDER: ${{ vars.TTS_PROVIDER || 'edge' }}
+          TTS_PROVIDER: ${{ vars.TTS_PROVIDER || 'gemini' }}
           TTS_VOICE: ${{ vars.TTS_VOICE || 'ko-KR-SunHiNeural' }}
           TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
           TTS_PITCH: ${{ vars.TTS_PITCH || '+0Hz' }}

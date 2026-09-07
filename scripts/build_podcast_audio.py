@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 DEFAULT_GEMINI_TTS_VOICE = "Kore"
 DEFAULT_GEMINI_TTS_START_DATE = "2026-07-15"
+DEFAULT_TTS_PROVIDER = "gemini"
 
 
 NUMBER_WORDS = {
@@ -115,9 +116,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--site-base-url", default=os.getenv("PODCAST_BASE_URL", ""), help="Public podcast page URL.")
     parser.add_argument(
         "--provider",
-        default=os.getenv("TTS_PROVIDER", "edge"),
+        default=os.getenv("TTS_PROVIDER", DEFAULT_TTS_PROVIDER),
         choices=["edge", "gemini", "alternate"],
-        help="TTS provider. alternate uses Gemini every other KST calendar day and Edge on the intervening days.",
+        help="TTS provider. Gemini is the default and automatically falls back to Edge unless --strict-provider is set.",
     )
     parser.add_argument("--voice", default=os.getenv("TTS_VOICE", "ko-KR-SunHiNeural"), help="edge-tts voice.")
     parser.add_argument("--rate", default=os.getenv("TTS_RATE", "+0%"), help="edge-tts rate, e.g. +0%.")
