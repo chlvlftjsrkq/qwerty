@@ -483,7 +483,7 @@ jobs:
 
       - name: Post podcast link to KakaoTalk
         timeout-minutes: 3
-        if: ${{ github.event.inputs.send_podcast == 'true' }}
+        if: ${{ !cancelled() && github.event.inputs.send_podcast == 'true' }}
         shell: powershell
         env:
           TARGET_CHATROOM: ${{ github.event.inputs.target_chatroom || vars.TARGET_CHATROOM }}
