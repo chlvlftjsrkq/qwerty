@@ -6,6 +6,8 @@ from PIL import Image, ImageDraw
 
 from scripts.publish_kakao_notice import (
     Box,
+    find_menu_separator_rows,
+    find_notice_menu_center,
     find_latest_notice_action_band,
     find_latest_outgoing_bubble,
     notice_marker,
@@ -53,6 +55,17 @@ class KakaoNoticeTests(unittest.TestCase):
         self.assertIsNotNone(found)
         self.assertGreaterEqual(found.top, 520)
         self.assertGreaterEqual(found.right, 490)
+
+    def test_notice_menu_center_uses_separator_structure(self) -> None:
+        for height, separators in ((351, (33, 164, 199, 282, 317)), (386, (33, 164, 199, 282, 317, 352))):
+            with self.subTest(height=height):
+                image = Image.new("RGB", (112, height), (255, 255, 255))
+                draw = ImageDraw.Draw(image)
+                for row in separators:
+                    draw.line((13, row, 98, row), fill=(242, 242, 242), width=1)
+
+                self.assertEqual(list(separators), find_menu_separator_rows(image))
+                self.assertEqual((56, 182), find_notice_menu_center(image))
 
 
 if __name__ == "__main__":

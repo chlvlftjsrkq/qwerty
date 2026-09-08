@@ -36,7 +36,6 @@ pyautogui.FAILSAFE = False
 
 MENU_CLASS = "EVA_Menu"
 WINDOW_CLASS = "EVA_Window_Dblclk"
-NOTICE_MENU_Y_RATIO = 147 / 351
 
 
 @dataclass(frozen=True)
@@ -195,6 +194,43 @@ def find_latest_notice_action_band(image: Image.Image, chat_region: Box) -> Box 
     return max(candidates, key=lambda band: band.bottom) if candidates else None
 
 
+def find_menu_separator_rows(image: Image.Image) -> list[int]:
+    pixels = image.convert("RGB").load()
+    left = max(2, image.width // 10)
+    right = min(image.width - 2, image.width - image.width // 10)
+    minimum_pixels = max(20, int((right - left) * 0.7))
+    matching_rows: list[int] = []
+    for y in range(1, image.height - 1):
+        matches = 0
+        for x in range(left, right):
+            red, green, blue = pixels[x, y]
+            if 225 <= red <= 250 and abs(red - green) <= 3 and abs(green - blue) <= 3:
+                matches += 1
+        if matches >= minimum_pixels:
+            matching_rows.append(y)
+
+    groups: list[list[int]] = []
+    for row in matching_rows:
+        if not groups or row > groups[-1][-1] + 1:
+            groups.append([row])
+        else:
+            groups[-1].append(row)
+    return [round(sum(group) / len(group)) for group in groups]
+
+
+def find_notice_menu_center(image: Image.Image) -> tuple[int, int] | None:
+    separators = find_menu_separator_rows(image)
+    if len(separators) < 3:
+        return None
+
+    notice_top = separators[1]
+    notice_bottom = separators[2]
+    row_height = notice_bottom - notice_top
+    if not 20 <= row_height <= 60:
+        return None
+    return image.width // 2, round((notice_top + notice_bottom) / 2)
+
+
 def room_and_chat_region(room: str, wait_seconds: float) -> tuple[int, int, Box, Box, dict]:
     if config is None or controller is None:
         raise RuntimeError(
@@ -302,8 +338,15 @@ def register_latest_message_as_notice(
     menu_hwnd, menu_box, bubble = open_full_message_menu(
         room_hwnd, list_hwnd, room_box, chat_region, wait_seconds
     )
-    notice_x = menu_box.center[0]
-    notice_y = menu_box.top + round(menu_box.height * NOTICE_MENU_Y_RATIO)
+    menu_image = ImageGrab.grab(
+        (menu_box.left, menu_box.top, menu_box.right, menu_box.bottom)
+    ).convert("RGB")
+    notice_center = find_notice_menu_center(menu_image)
+    if notice_center is None:
+        win32gui.PostMessage(menu_hwnd, win32con.WM_CLOSE, 0, 0)
+        raise RuntimeError("The KakaoTalk notice menu row could not be identified safely.")
+    notice_x = menu_box.left + notice_center[0]
+    notice_y = menu_box.top + notice_center[1]
     pyautogui.click(notice_x, notice_y)
 
     value = wait_for_value(
@@ -333,6 +376,7 @@ def register_latest_message_as_notice(
     return {
         "bubble": list((bubble.left, bubble.top, bubble.right, bubble.bottom)),
         "menu": list((menu_box.left, menu_box.top, menu_box.right, menu_box.bottom)),
+        "notice_menu_point": [notice_x, notice_y],
         "dialog": list((dialog_box.left, dialog_box.top, dialog_box.right, dialog_box.bottom)),
     }
 
