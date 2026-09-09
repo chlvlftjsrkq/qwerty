@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import call, patch
 
 from PIL import Image, ImageDraw
 
@@ -10,8 +11,10 @@ from scripts.publish_kakao_notice import (
     find_notice_menu_center,
     find_latest_notice_action_band,
     find_latest_outgoing_bubble,
+    normalize_control_text,
     notice_marker,
     prepare_notice_text,
+    write_notice_comment_input,
 )
 
 
@@ -23,6 +26,40 @@ class KakaoNoticeTests(unittest.TestCase):
 
     def test_notice_marker_uses_first_nonempty_line(self) -> None:
         self.assertEqual("🪖 2026-09-08 병무청 뉴스 브리핑", notice_marker("\n🪖 2026-09-08 병무청 뉴스 브리핑\n본문"))
+
+    def test_control_text_normalizes_windows_line_endings(self) -> None:
+        self.assertEqual("첫 줄\n둘째 줄", normalize_control_text("  첫 줄\r\n둘째 줄\r\n"))
+
+    @patch("scripts.publish_kakao_notice.time.sleep")
+    @patch("scripts.publish_kakao_notice.wait_for_value", return_value=True)
+    @patch("scripts.publish_kakao_notice.window_box", return_value=Box(10, 20, 210, 80))
+    @patch("scripts.publish_kakao_notice.pyperclip")
+    @patch("scripts.publish_kakao_notice.pyautogui")
+    @patch("scripts.publish_kakao_notice.win32gui")
+    def test_notice_comment_uses_focused_clipboard_paste(
+        self,
+        win32gui,
+        pyautogui,
+        pyperclip,
+        _window_box,
+        _wait_for_value,
+        _sleep,
+    ) -> None:
+        pyperclip.paste.return_value = "기존 클립보드"
+
+        write_notice_comment_input(101, 202, "음성요약\nhttps://example.test", 8.0)
+
+        win32gui.SetForegroundWindow.assert_called_once_with(101)
+        pyautogui.click.assert_called_once_with(110, 50)
+        self.assertEqual(
+            [call("ctrl", "a"), call("ctrl", "v")],
+            pyautogui.hotkey.call_args_list,
+        )
+        pyautogui.press.assert_called_once_with("backspace")
+        self.assertEqual(
+            [call("음성요약\nhttps://example.test"), call("기존 클립보드")],
+            pyperclip.copy.call_args_list,
+        )
 
     def test_latest_outgoing_bubble_survives_window_resize(self) -> None:
         for width, height in ((380, 662), (520, 760)):

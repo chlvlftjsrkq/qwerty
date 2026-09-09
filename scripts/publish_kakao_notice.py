@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import pyautogui
+import pyperclip
 import win32con
 import win32gui
 import win32process
@@ -452,6 +453,40 @@ def open_notice_detail(
     return details[0][0], details[0][1], action_band
 
 
+def normalize_control_text(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def write_notice_comment_input(
+    detail_hwnd: int,
+    edit_hwnd: int,
+    body: str,
+    wait_seconds: float,
+) -> None:
+    win32gui.SetForegroundWindow(detail_hwnd)
+    edit_box = window_box(edit_hwnd)
+    previous_clipboard = pyperclip.paste()
+    try:
+        for _attempt in range(2):
+            pyautogui.click(*edit_box.center)
+            time.sleep(0.2)
+            pyautogui.hotkey("ctrl", "a")
+            pyautogui.press("backspace")
+            pyperclip.copy(body)
+            pyautogui.hotkey("ctrl", "v")
+            written = wait_for_value(
+                lambda: normalize_control_text(win32gui.GetWindowText(edit_hwnd))
+                == normalize_control_text(body),
+                min(wait_seconds, 2.0),
+            )
+            if written:
+                return
+    finally:
+        time.sleep(0.1)
+        pyperclip.copy(previous_clipboard)
+    raise RuntimeError("The notice comment was not written to the KakaoTalk input control.")
+
+
 def post_notice_comment(detail_hwnd: int, edit_hwnd: int, comment: str, wait_seconds: float) -> None:
     body = comment.strip()
     if not body:
@@ -459,15 +494,11 @@ def post_notice_comment(detail_hwnd: int, edit_hwnd: int, comment: str, wait_sec
     if len(body) > 1000:
         raise ValueError("The notice comment is unexpectedly long.")
 
-    win32gui.SendMessage(edit_hwnd, win32con.WM_SETTEXT, 0, body)
-    if win32gui.GetWindowText(edit_hwnd).strip() != body:
-        raise RuntimeError("The notice comment was not written to the KakaoTalk input control.")
-    win32gui.SetForegroundWindow(detail_hwnd)
-    edit_box = window_box(edit_hwnd)
-    pyautogui.click(*edit_box.center)
+    write_notice_comment_input(detail_hwnd, edit_hwnd, body, wait_seconds)
     pyautogui.press("enter")
     cleared = wait_for_value(
-        lambda: win32gui.IsWindow(edit_hwnd) and not win32gui.GetWindowText(edit_hwnd).strip(),
+        lambda: win32gui.IsWindow(edit_hwnd)
+        and not normalize_control_text(win32gui.GetWindowText(edit_hwnd)),
         min(wait_seconds, 3.0),
     )
     if not cleared:
