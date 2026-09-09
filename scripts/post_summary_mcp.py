@@ -42,6 +42,15 @@ def resolve_mcp_command(value: str) -> str:
     return found
 
 
+def ensure_room_not_blocked(room: str) -> None:
+    from kakao_mcp import controller
+    from kakao_mma_news.kakao_ui_guard import clear_blocking_dialogs_or_raise
+
+    room_hwnd = controller.find_chat_window(room)
+    if isinstance(room_hwnd, int) and room_hwnd:
+        clear_blocking_dialogs_or_raise(room_hwnd)
+
+
 def parse_tool_json(result: Any) -> dict[str, Any]:
     text = "\n".join(getattr(item, "text", repr(item)) for item in result.content)
     try:
@@ -112,7 +121,6 @@ def post_chunks_to_open_room(
     chunks: list[str],
 ) -> int:
     from kakao_mcp import controller
-
     sent: list[dict[str, Any]] = []
     for index, chunk in enumerate(chunks, start=1):
         if is_kakao_delivery_paused():
@@ -129,6 +137,7 @@ def post_chunks_to_open_room(
                 )
             )
             return 0
+        ensure_room_not_blocked(args.room)
         body = chunk if len(chunks) == 1 else f"({index}/{len(chunks)})\n{chunk}"
         result = controller.send_message_to_room(args.room, body)
         sent.append(result)
@@ -241,6 +250,7 @@ async def post_summary(args: argparse.Namespace) -> int:
                 return 0
             if open_result.get("error"):
                 print(json.dumps({"open_result": open_result}, ensure_ascii=False))
+                ensure_room_not_blocked(args.room)
                 config = load_config(None)
                 config = replace(
                     config,
@@ -286,6 +296,7 @@ async def post_summary(args: argparse.Namespace) -> int:
                         )
                     )
                     return 0
+                ensure_room_not_blocked(args.room)
                 body = chunk if len(chunks) == 1 else f"({index}/{len(chunks)})\n{chunk}"
                 result = await call_tool(
                     session,

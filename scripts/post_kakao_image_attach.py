@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
-import ctypes.wintypes
 import json
 import sys
 import time
@@ -16,6 +14,14 @@ import pyautogui
 import pyperclip
 from kakao_mcp import controller
 from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
+from kakao_mma_news.kakao_ui_guard import (
+    attachment_points,
+    close_owned_common_dialogs,
+    owned_common_dialogs,
+    owned_file_dialogs,
+    submit_file_dialog,
+    wait_for_new_file_dialog,
+)
 from kakao_login_guard import ensure_chat_tab, ensure_kakao_ready
 
 pyautogui.FAILSAFE = False
@@ -33,34 +39,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-USER32 = ctypes.windll.user32
-
-
-def enum_window_titles() -> list[tuple[int, str]]:
-    titles: list[tuple[int, str]] = []
-    buffer = ctypes.create_unicode_buffer(512)
-
-    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-    def proc(hwnd: int, _lparam: int) -> bool:
-        if USER32.IsWindowVisible(hwnd):
-            USER32.GetWindowTextW(hwnd, buffer, 512)
-            title = buffer.value
-            if title:
-                titles.append((int(hwnd), title))
-        return True
-
-    USER32.EnumWindows(proc, 0)
-    return titles
-
-
 def get_window_rect(hwnd: int) -> tuple[int, int, int, int]:
-    rect = ctypes.wintypes.RECT()
-    USER32.GetWindowRect(hwnd, ctypes.byref(rect))
-    return rect.left, rect.top, rect.right, rect.bottom
+    import win32gui
 
-
-def open_dialog_visible() -> bool:
-    return any(title in {"열기", "Open"} for _, title in enum_window_titles())
+    return tuple(int(value) for value in win32gui.GetWindowRect(hwnd))
 
 
 def bring_room_to_front(
@@ -105,7 +87,7 @@ def bring_room_to_front(
                     "open_attempt": attempt,
                     "room": room,
                     "open_result": open_result,
-                    "open_windows": enum_window_titles(),
+                    "room_hwnd": int(hwnd or 0),
                 },
                 ensure_ascii=False,
             )
@@ -151,39 +133,57 @@ def attach_image(
         }
 
     hwnd, rect, open_result = bring_room_to_front(room, open_wait, open_attempts, open_retry_wait)
-    left, _top, _right, bottom = rect
-
-    # PC Kakao places the file attachment icon near the lower-left of the chat window.
-    file_icon_x = left + 87
-    file_icon_y = bottom - 25
+    file_icon_point, send_button_point = attachment_points(rect)
+    stale_dialogs_closed = close_owned_common_dialogs(hwnd)
+    if stale_dialogs_closed:
+        controller.bring_window_to_front(hwnd)
+        time.sleep(0.5)
+    if owned_common_dialogs(hwnd):
+        raise RuntimeError("A stale KakaoTalk attachment dialog could not be closed.")
     if is_kakao_delivery_paused():
         return {
             **delivery_status(room=room, delivery_type="image"),
             "image": str(image_path),
             "skipped": True,
         }
-    pyautogui.click(file_icon_x, file_icon_y)
-    time.sleep(1.0)
-    dialog_after_click = open_dialog_visible()
+    existing_dialogs = {info.hwnd for info in owned_file_dialogs(hwnd)}
+    dialog = None
+    try:
+        for _attempt in range(2):
+            controller.bring_window_to_front(hwnd)
+            time.sleep(0.3)
+            pyautogui.click(*file_icon_point)
+            dialog = wait_for_new_file_dialog(
+                hwnd,
+                existing_dialogs,
+                timeout_seconds=max(6.0, open_wait * 3),
+            )
+            if dialog is not None:
+                break
+        if dialog is None:
+            raise RuntimeError("KakaoTalk file attachment dialog did not open.")
 
-    if not dialog_after_click:
-        # Open-chat notice or slow UI animation can intercept the first click.
-        pyautogui.press("enter")
-        time.sleep(0.8)
-        if not open_dialog_visible():
-            pyautogui.click(file_icon_x, file_icon_y)
-            time.sleep(1.0)
+        if not submit_file_dialog(dialog.hwnd, image_path, timeout_seconds=max(6.0, open_wait * 3)):
+            raise RuntimeError("KakaoTalk file attachment dialog did not close after selecting the image.")
 
-    pyperclip.copy(str(image_path))
-    pyautogui.hotkey("ctrl", "v")
-    time.sleep(0.3)
-    pyautogui.press("enter")
-    time.sleep(2.0)
+        time.sleep(1.2)
+        controller.bring_window_to_front(hwnd)
+        time.sleep(0.4)
+        if owned_common_dialogs(hwnd):
+            raise RuntimeError("KakaoTalk opened a blocking dialog before image confirmation.")
 
-    # The file-send confirmation panel opens inside the Kakao room. The send button
-    # sits at the lower-right of that panel on the current PC Kakao layout.
-    pyautogui.click(left + 565, bottom - 24)
-    time.sleep(send_wait)
+        # Kakao's image confirmation panel is inside the room, so anchor the click
+        # to the room's current right edge instead of assuming a fixed window width.
+        rect = get_window_rect(hwnd)
+        _file_icon_point, send_button_point = attachment_points(rect)
+        pyautogui.click(*send_button_point)
+        time.sleep(send_wait)
+        if owned_common_dialogs(hwnd):
+            raise RuntimeError("KakaoTalk left a blocking dialog open after image delivery.")
+    except Exception:
+        close_owned_common_dialogs(hwnd)
+        controller.bring_window_to_front(hwnd)
+        raise
 
     controller.bring_window_to_front(hwnd)
     time.sleep(0.5)
@@ -197,7 +197,11 @@ def attach_image(
         "hwnd": hwnd,
         "rect": list(rect),
         "open_result": open_result,
-        "dialog_after_click": dialog_after_click,
+        "file_dialog_hwnd": dialog.hwnd if dialog else 0,
+        "dialog_closed": True,
+        "stale_dialogs_closed": stale_dialogs_closed,
+        "file_icon_point": list(file_icon_point),
+        "send_button_point": list(send_button_point),
         "screenshot": str(screenshot_path) if screenshot_path else "",
     }
 
