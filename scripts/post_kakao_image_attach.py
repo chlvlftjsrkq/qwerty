@@ -15,8 +15,8 @@ import pyperclip
 from kakao_mcp import controller
 from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
 from kakao_mma_news.kakao_ui_guard import (
-    attachment_points,
     close_owned_common_dialogs,
+    file_icon_point,
     owned_common_dialogs,
     owned_file_dialogs,
     submit_file_dialog,
@@ -133,7 +133,7 @@ def attach_image(
         }
 
     hwnd, rect, open_result = bring_room_to_front(room, open_wait, open_attempts, open_retry_wait)
-    file_icon_point, send_button_point = attachment_points(rect)
+    attach_point = file_icon_point(rect)
     stale_dialogs_closed = close_owned_common_dialogs(hwnd)
     if stale_dialogs_closed:
         controller.bring_window_to_front(hwnd)
@@ -152,7 +152,7 @@ def attach_image(
         for _attempt in range(2):
             controller.bring_window_to_front(hwnd)
             time.sleep(0.3)
-            pyautogui.click(*file_icon_point)
+            pyautogui.click(*attach_point)
             dialog = wait_for_new_file_dialog(
                 hwnd,
                 existing_dialogs,
@@ -166,18 +166,11 @@ def attach_image(
         if not submit_file_dialog(dialog.hwnd, image_path, timeout_seconds=max(6.0, open_wait * 3)):
             raise RuntimeError("KakaoTalk file attachment dialog did not close after selecting the image.")
 
-        time.sleep(1.2)
+        # Current PC Kakao sends the selected image as soon as the file dialog
+        # accepts it. Wait for upload completion before sending the text body.
+        time.sleep(send_wait)
         controller.bring_window_to_front(hwnd)
         time.sleep(0.4)
-        if owned_common_dialogs(hwnd):
-            raise RuntimeError("KakaoTalk opened a blocking dialog before image confirmation.")
-
-        # Kakao's image confirmation panel is inside the room, so anchor the click
-        # to the room's current right edge instead of assuming a fixed window width.
-        rect = get_window_rect(hwnd)
-        _file_icon_point, send_button_point = attachment_points(rect)
-        pyautogui.click(*send_button_point)
-        time.sleep(send_wait)
         if owned_common_dialogs(hwnd):
             raise RuntimeError("KakaoTalk left a blocking dialog open after image delivery.")
     except Exception:
@@ -200,8 +193,8 @@ def attach_image(
         "file_dialog_hwnd": dialog.hwnd if dialog else 0,
         "dialog_closed": True,
         "stale_dialogs_closed": stale_dialogs_closed,
-        "file_icon_point": list(file_icon_point),
-        "send_button_point": list(send_button_point),
+        "file_icon_point": list(attach_point),
+        "send_button_click_required": False,
         "screenshot": str(screenshot_path) if screenshot_path else "",
     }
 

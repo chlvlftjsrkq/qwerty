@@ -67,11 +67,11 @@ class WindowInfo:
     owner: int
 
 
-def attachment_points(rect: tuple[int, int, int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
+def file_icon_point(rect: tuple[int, int, int, int]) -> tuple[int, int]:
     left, top, right, bottom = rect
     if right - left < 160 or bottom - top < 60:
         raise RuntimeError(f"KakaoTalk room window is too small for image attachment: {rect}")
-    return (left + 87, bottom - 25), (right - 35, bottom - 24)
+    return left + 87, bottom - 25
 
 
 def _require_windows() -> None:
