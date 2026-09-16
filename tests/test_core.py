@@ -1,3 +1,4 @@
+import json
 import re
 import tempfile
 import unittest
@@ -63,6 +64,7 @@ from scripts.watch_negative_news import (
     build_alert_message,
     build_diagnostic_report,
     classify_heuristic,
+    duplicate_with_codex,
     extract_topic_entity,
     has_core_issue_relevance,
     has_institution_reputation_context,
@@ -926,6 +928,109 @@ class CoreTests(unittest.TestCase):
             topic_fingerprint(first, classify_heuristic(first)),
             topic_fingerprint(reaction, classify_heuristic(reaction)),
         )
+
+    @patch("scripts.watch_negative_news.resolve_codex_command", return_value="codex")
+    @patch("scripts.watch_negative_news.subprocess.run")
+    def test_negative_watch_codex_duplicate_uses_stdin_without_user_config(
+        self,
+        run,
+        _resolve,
+    ):
+        candidate = NewsItem(
+            title="홍지선 후보자 병역 자료 제출 논란",
+            url="https://example.com/new",
+            naver_url="",
+            source="example.com",
+            published_at="2026-09-16T15:00:00+09:00",
+            summary="병무청 자료가 소실됐다는 해명입니다.",
+            query="병무청 논란",
+        )
+        classification = classify_heuristic(candidate)
+        recent = alert_record(
+            NewsItem(
+                title="홍지선 청문회 병적기록 자료 논란",
+                url="https://example.com/old",
+                naver_url="",
+                source="example.com",
+                published_at="2026-09-16T14:00:00+09:00",
+                summary="4급 보충역 자료가 병무청에서 소실됐다는 해명입니다.",
+                query="병무청 논란",
+            ),
+            classification,
+            "기관논란:test",
+            datetime.fromisoformat("2026-09-16T14:05:00+09:00"),
+        )
+
+        def complete(command, **kwargs):
+            output_path = Path(command[command.index("-o") + 1])
+            output_path.write_text(
+                '{"duplicate":true,"matched_topic_key":"기관논란:test","reason":"같은 병역 자료 소실 논란입니다."}',
+                encoding="utf-8",
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        run.side_effect = complete
+        with tempfile.TemporaryDirectory() as temp_dir:
+            decision, matched, reason = duplicate_with_codex(
+                candidate,
+                classification,
+                [recent],
+                codex_command="codex",
+                codex_model="gpt-6-astra",
+                timeout_seconds=60,
+                output_dir=Path(temp_dir),
+            )
+
+        self.assertTrue(decision)
+        self.assertEqual("기관논란:test", matched)
+        self.assertIn("같은 병역 자료", reason)
+        command = run.call_args.args[0]
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn('model_reasoning_effort="high"', command)
+        payload = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(candidate.title, payload["candidate"]["article"]["title"])
+
+    @patch("scripts.watch_negative_news.resolve_codex_command", return_value="codex")
+    @patch("scripts.watch_negative_news.subprocess.run")
+    def test_negative_watch_codex_file_access_failure_is_unavailable(
+        self,
+        run,
+        _resolve,
+    ):
+        candidate = NewsItem(
+            title="홍지선 후보자 병역 자료 제출 논란",
+            url="https://example.com/new",
+            naver_url="",
+            source="example.com",
+            published_at="2026-09-16T15:00:00+09:00",
+            summary="병무청 자료가 소실됐다는 해명입니다.",
+            query="병무청 논란",
+        )
+        classification = classify_heuristic(candidate)
+        recent = alert_record(candidate, classification, "기관논란:test", datetime.now(timezone.utc))
+
+        def complete(command, **kwargs):
+            output_path = Path(command[command.index("-o") + 1])
+            output_path.write_text(
+                '{"duplicate":false,"matched_topic_key":"","reason":"도구 실행 오류로 입력 파일을 읽지 못해 확인할 수 없습니다."}',
+                encoding="utf-8",
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        run.side_effect = complete
+        with tempfile.TemporaryDirectory() as temp_dir:
+            decision, _matched, reason = duplicate_with_codex(
+                candidate,
+                classification,
+                [recent],
+                codex_command="codex",
+                codex_model="gpt-6-astra",
+                timeout_seconds=60,
+                output_dir=Path(temp_dir),
+            )
+
+        self.assertIsNone(decision)
+        self.assertIn("입력 파일을 읽지 못", reason)
 
     def test_negative_watch_ignores_leading_issue_label_for_topic_entity(self):
         first = NewsItem(

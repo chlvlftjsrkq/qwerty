@@ -941,12 +941,12 @@ def duplicate_with_codex(
     codex_model: str,
     timeout_seconds: float,
     output_dir: Path,
-) -> tuple[bool, str, str]:
+) -> tuple[bool | None, str, str]:
     if not recent_records:
         return False, "", ""
     resolved = resolve_codex_command(codex_command)
     if not resolved:
-        return False, "", ""
+        return None, "", "Codex 중복 판단 명령을 찾지 못했습니다."
 
     payload = {
         "candidate": {
@@ -958,17 +958,8 @@ def duplicate_with_codex(
         # Keep the old key as a compatibility hint for older prompt traces.
         "recent_sent_alerts": [compact_alert_record_for_ai(record) for record in recent_records[:30]],
     }
+    payload_json = json.dumps(payload, ensure_ascii=False)
     output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        prefix="negative-watch-duplicate-input-",
-        suffix=".json",
-        dir=output_dir,
-        mode="w",
-        encoding="utf-8",
-        delete=False,
-    ) as input_file:
-        json.dump(payload, input_file, ensure_ascii=False)
-        input_path = Path(input_file.name)
 
     with tempfile.NamedTemporaryFile(
         prefix="negative-watch-duplicate-output-",
@@ -981,8 +972,7 @@ def duplicate_with_codex(
     prompt = " ".join(
         [
             "Task: Compare a candidate Korean negative-news alert with alerts sent during the last 12 hours.",
-            "Read only this JSON file:",
-            str(input_path.resolve()),
+            "The complete input JSON object is attached through standard input. Use only that object.",
             "Decide whether the candidate is substantially the same issue as any recent sent alert.",
             "The comparison_alerts list can include alerts already selected earlier in this same run. Treat them as prior alerts for duplicate suppression.",
             "Treat it as duplicate when it is the same person, organization, legal dispute, allegation, or military-service controversy even if the news source, title wording, or publication time differs.",
@@ -999,6 +989,9 @@ def duplicate_with_codex(
         "read-only",
         "--color",
         "never",
+        "--ignore-user-config",
+        "-c",
+        'model_reasoning_effort="high"',
         "-o",
         str(output_path),
     ]
@@ -1009,7 +1002,7 @@ def duplicate_with_codex(
     try:
         result = subprocess.run(
             command,
-            input="",
+            input=payload_json,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -1018,22 +1011,34 @@ def duplicate_with_codex(
             check=False,
         )
         if result.returncode != 0:
-            return False, "", ""
+            return None, "", "Codex 중복 판단 실행에 실패했습니다."
         raw = output_path.read_text(encoding="utf-8").strip()
         data = load_json_object(raw)
+        duplicate = data.get("duplicate")
+        reason = clean_text(data.get("reason"))
+        if not isinstance(duplicate, bool):
+            return None, "", reason or "Codex 중복 판단 결과가 올바르지 않습니다."
+        unavailable_markers = (
+            "입력 파일을 읽지 못",
+            "입력 데이터를 읽지 못",
+            "도구 실행 오류",
+            "접근할 수 없",
+            "확인할 수 없",
+        )
+        if not duplicate and any(marker in reason for marker in unavailable_markers):
+            return None, "", reason
         return (
-            bool(data.get("duplicate")),
+            duplicate,
             clean_text(data.get("matched_topic_key")),
-            clean_text(data.get("reason")),
+            reason,
         )
     except Exception:
-        return False, "", ""
+        return None, "", "Codex 중복 판단 결과를 처리하지 못했습니다."
     finally:
-        for path in (input_path, output_path):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+        try:
+            output_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def selected_candidate_record(
@@ -2009,7 +2014,7 @@ def main() -> int:
         ):
             ai_duplicate_checks += 1
             checked_with_ai = True
-            is_duplicate, matched_topic_key, duplicate_reason = duplicate_with_codex(
+            duplicate_decision, matched_topic_key, duplicate_reason = duplicate_with_codex(
                 item,
                 classification,
                 comparison_records,
@@ -2018,7 +2023,8 @@ def main() -> int:
                 timeout_seconds=args.codex_timeout_seconds,
                 output_dir=output_dir,
             )
-            if is_duplicate:
+            checked_with_ai = duplicate_decision is not None
+            if duplicate_decision is True:
                 semantic_duplicate_count += 1
                 matched_record = find_record_by_topic(recent_alert_records, matched_topic_key)
                 matched_article = (
