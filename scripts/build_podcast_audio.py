@@ -886,17 +886,7 @@ def podcast_script_with_codex(
     if not payload["articles"]:
         return markdown_to_speech(summary, target_date, target_minutes, include_weather)
 
-    input_file = tempfile.NamedTemporaryFile(
-        prefix=f"podcast-script-input-{target_date.replace('~', '-to-')}-",
-        suffix=".json",
-        dir=output_dir,
-        mode="w",
-        encoding="utf-8",
-        delete=False,
-    )
-    json.dump(payload, input_file, ensure_ascii=False)
-    input_path = Path(input_file.name)
-    input_file.close()
+    payload_json = json.dumps(payload, ensure_ascii=False)
 
     output_file = tempfile.NamedTemporaryFile(
         prefix=f"podcast-script-output-{target_date.replace('~', '-to-')}-",
@@ -911,7 +901,7 @@ def podcast_script_with_codex(
         [
             "Task: Write a natural Korean podcast narration script for TTS.",
             "Your final answer must be plain Korean text only. Do not write Markdown, JSON, bullet points, headings, or code fences.",
-            f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
+            "The complete input JSON object is attached through standard input. Use only facts from that object.",
             "The script is for a Korean announcer. Use polite formal Korean with clear sentence endings such as 합니다, 했습니다, 입니다, 전했습니다, 확인됐습니다.",
             "Do not use ellipses, Unicode ellipsis, repeated dots, source labels, URLs, or emoji.",
             "Do not say 제목은, 주요 내용입니다, 관련 보도입니다, or 같은 이슈를 묶었습니다.",
@@ -939,6 +929,9 @@ def podcast_script_with_codex(
         "read-only",
         "--color",
         "never",
+        "--ignore-user-config",
+        "-c",
+        'model_reasoning_effort="high"',
         "-o",
         str(output_path),
     ]
@@ -952,7 +945,7 @@ def podcast_script_with_codex(
     try:
         result = subprocess.run(
             command,
-            input="",
+            input=payload_json,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -972,7 +965,7 @@ def podcast_script_with_codex(
         _validate_llm_script(script, str(payload["agency_name"]))
         return script
     finally:
-        for path in (input_path, output_path):
+        for path in (output_path,):
             try:
                 path.unlink()
             except FileNotFoundError:

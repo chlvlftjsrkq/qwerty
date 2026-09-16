@@ -602,17 +602,7 @@ def summarize_with_codex(
         "total_articles": len(articles),
         "articles": codex_article_payload(articles),
     }
-    input_file = tempfile.NamedTemporaryFile(
-        prefix=f"codex-input-{file_label}-",
-        suffix=".json",
-        dir=output_dir,
-        mode="w",
-        encoding="utf-8",
-        delete=False,
-    )
-    json.dump(payload, input_file, ensure_ascii=False)
-    input_path = Path(input_file.name)
-    input_file.close()
+    payload_json = json.dumps(payload, ensure_ascii=False)
 
     prompt = " ".join(
         [
@@ -626,9 +616,9 @@ def summarize_with_codex(
             "Do not use Markdown heading markers such as # before item numbers.",
             "Do not use horizontal divider lines such as ---.",
             "Do not add a closing guidance line beginning with 💡.",
-            f"Read the input JSON file at this path and use only facts from that file: {input_path.resolve()}",
+            "The complete input JSON object is attached through standard input. Use only facts from that object.",
             f"The briefing date label is {date_label}; summarize all articles within target_start_date through target_end_date as one combined briefing.",
-            "Do not ask the user to paste articles; the file already exists in the workspace.",
+            "Do not ask the user to paste articles; the complete input is already attached.",
             "Do not infer unsupported facts.",
             f"Exclude articles that are weakly related to {agency_name}.",
             "Review all input articles and select the most important briefing items yourself. Do not simply copy the first articles.",
@@ -669,6 +659,9 @@ def summarize_with_codex(
         "read-only",
         "--color",
         "never",
+        "--ignore-user-config",
+        "-c",
+        'model_reasoning_effort="high"',
         "-o",
         str(output_path),
     ]
@@ -681,7 +674,7 @@ def summarize_with_codex(
     try:
         result = subprocess.run(
             command,
-            input="",
+            input=payload_json,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -707,16 +700,24 @@ def summarize_with_codex(
             debug_path = output_dir / f"codex-raw-{file_label}.txt"
             debug_path.write_text(raw_summary, encoding="utf-8")
             raise RuntimeError(f"Codex CLI JSON 파싱 실패(raw: {debug_path}): {exc}") from exc
+        _validate_codex_summary_data(summary_data, articles)
         return _render_codex_summary(target_date, summary_data, articles, agency_name, start_date=effective_start)
     finally:
         try:
             output_path.unlink()
         except FileNotFoundError:
             pass
-        try:
-            input_path.unlink()
-        except FileNotFoundError:
-            pass
+
+
+def _validate_codex_summary_data(data: dict, articles: list[Article]) -> None:
+    items = data.get("items")
+    if articles and (not isinstance(items, list) or not items):
+        raise RuntimeError("Codex CLI가 기사 항목을 선택하지 않아 발송을 중단했습니다.")
+    failure_text = " ".join(
+        str(data.get(key) or "") for key in ("excluded_note", "one_line")
+    )
+    if re.search(r"(접근|읽|확인).{0,12}(못|실패)|작성하지 못", failure_text):
+        raise RuntimeError("Codex CLI가 입력 기사 처리 실패를 반환해 발송을 중단했습니다.")
 
 
 def _trim_sentence(value: str, limit: int = 180) -> str:

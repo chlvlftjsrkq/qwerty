@@ -21,6 +21,7 @@ from kakao_mma_news.news import (
     briefing_priority_score,
     dedupe_articles,
     matches_required_terms,
+    repair_korean_mojibake,
     strip_html,
 )
 from scripts.filter_articles_by_summary_sources import (
@@ -37,6 +38,7 @@ from kakao_mma_news.summarize import (
     _prepend_weather_summary,
     _render_codex_summary,
     _summary_article_groups,
+    _validate_codex_summary_data,
     codex_article_payload,
     summary_date_label,
     summarize_heuristic,
@@ -74,6 +76,30 @@ from scripts.watch_negative_news import (
 
 
 class CoreTests(unittest.TestCase):
+    def test_repairs_cp949_title_decoded_as_latin1(self):
+        broken = "¹ÚÀ§ CCTV ³í¶õ ¼Ó¡¦¾Æ³» ¼ÛÁöÀº, ¹æ¼Û Áß ´«¹°"
+        self.assertEqual(
+            "박위 CCTV 논란 속…아내 송지은, 방송 중 눈물",
+            repair_korean_mojibake(broken),
+        )
+
+    def test_codex_summary_rejects_missing_items_and_file_access_failure(self):
+        article = Article(
+            "병무청 정책 기사",
+            "https://example.com/article",
+            "example.com",
+            datetime(2026, 9, 15, tzinfo=timezone.utc),
+            "병무청 정책 내용입니다.",
+            "test",
+        )
+        with self.assertRaisesRegex(RuntimeError, "기사 항목"):
+            _validate_codex_summary_data({"items": [], "one_line": ""}, [article])
+        with self.assertRaisesRegex(RuntimeError, "입력 기사 처리 실패"):
+            _validate_codex_summary_data(
+                {"items": [{"title": article.title}], "one_line": "기사 파일에 접근하지 못했습니다."},
+                [article],
+            )
+
     def test_gemini_is_the_default_tts_provider_every_day(self):
         self.assertEqual("gemini", DEFAULT_TTS_PROVIDER)
         self.assertEqual("gemini", resolve_tts_provider(DEFAULT_TTS_PROVIDER, "2026-09-07")[0])

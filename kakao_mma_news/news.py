@@ -118,8 +118,26 @@ def strip_html(value: str | None) -> str:
         return ""
     text = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
-    text = html.unescape(text)
+    text = repair_korean_mojibake(html.unescape(text))
     return normalize_space(text)
+
+
+def repair_korean_mojibake(value: str) -> str:
+    """Repair Korean CP949 bytes that were decoded as Latin-1 by a news source."""
+    if not value:
+        return ""
+    suspicious = sum(0x80 <= ord(char) <= 0xFF for char in value)
+    if suspicious < 3:
+        return value
+    try:
+        repaired = value.encode("latin-1").decode("cp949")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+    repaired_hangul = len(re.findall(r"[가-힣]", repaired))
+    repaired_suspicious = sum(0x80 <= ord(char) <= 0xFF for char in repaired)
+    if repaired_hangul >= 2 and repaired_suspicious < suspicious:
+        return repaired
+    return value
 
 
 def normalize_space(value: str) -> str:
