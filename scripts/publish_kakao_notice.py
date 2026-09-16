@@ -467,24 +467,29 @@ def write_notice_comment_input(
     edit_box = window_box(edit_hwnd)
     previous_clipboard = pyperclip.paste()
     try:
-        for _attempt in range(2):
-            pyautogui.click(*edit_box.center)
-            time.sleep(0.2)
-            pyautogui.hotkey("ctrl", "a")
-            pyautogui.press("backspace")
-            pyperclip.copy(body)
-            pyautogui.hotkey("ctrl", "v")
-            written = wait_for_value(
-                lambda: normalize_control_text(win32gui.GetWindowText(edit_hwnd))
-                == normalize_control_text(body),
-                min(wait_seconds, 2.0),
-            )
-            if written:
-                return
+        pyautogui.click(*edit_box.center)
+        time.sleep(0.2)
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("backspace")
+        pyperclip.copy(body)
+        pyautogui.hotkey("ctrl", "v")
+        # KakaoTalk's RichEdit20W accepts the paste but always reports an empty
+        # value through GetWindowText. Give its custom editor time to process
+        # the clipboard event and verify the submission by editor recreation.
+        time.sleep(min(max(wait_seconds / 20.0, 0.3), 0.6))
     finally:
-        time.sleep(0.1)
         pyperclip.copy(previous_clipboard)
-    raise RuntimeError("The notice comment was not written to the KakaoTalk input control.")
+
+
+def notice_comment_editors(detail_hwnd: int) -> list[int]:
+    editors: list[int] = []
+
+    def callback(child_hwnd: int, _extra: object) -> None:
+        if win32gui.GetClassName(child_hwnd) == "RichEdit20W":
+            editors.append(int(child_hwnd))
+
+    win32gui.EnumChildWindows(detail_hwnd, callback, None)
+    return editors
 
 
 def post_notice_comment(detail_hwnd: int, edit_hwnd: int, comment: str, wait_seconds: float) -> None:
@@ -495,14 +500,22 @@ def post_notice_comment(detail_hwnd: int, edit_hwnd: int, comment: str, wait_sec
         raise ValueError("The notice comment is unexpectedly long.")
 
     write_notice_comment_input(detail_hwnd, edit_hwnd, body, wait_seconds)
-    pyautogui.press("enter")
-    cleared = wait_for_value(
-        lambda: win32gui.IsWindow(edit_hwnd)
-        and not normalize_control_text(win32gui.GetWindowText(edit_hwnd)),
+    detail_box = window_box(detail_hwnd)
+    edit_box = window_box(edit_hwnd)
+    submit_point = ((edit_box.right + detail_box.right) // 2, edit_box.center[1])
+    pyautogui.click(*submit_point)
+    submitted = wait_for_value(
+        lambda: not win32gui.IsWindow(edit_hwnd),
         min(wait_seconds, 3.0),
     )
-    if not cleared:
-        raise RuntimeError("The KakaoTalk notice comment input did not clear after submission.")
+    if not submitted:
+        raise RuntimeError("The KakaoTalk notice comment editor was not recreated after submission.")
+    replacement = wait_for_value(
+        lambda: notice_comment_editors(detail_hwnd),
+        min(wait_seconds, 3.0),
+    )
+    if not replacement:
+        raise RuntimeError("The KakaoTalk notice comment editor did not return after submission.")
     time.sleep(0.4)
 
 

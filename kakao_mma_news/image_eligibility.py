@@ -11,7 +11,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from PIL import Image, ImageOps, ImageStat
 
-from .news import Article
+from .news import Article, repair_korean_mojibake
 
 
 USER_AGENT = "agency-news-talkbriefing/0.1 (+image-preflight)"
@@ -80,7 +80,9 @@ def _meta_page_title(html: str) -> str:
             if updated == decoded:
                 break
             decoded = updated
-        return re.sub(r"\s+", " ", decoded).strip().lstrip("\ufeff")
+        return repair_korean_mojibake(
+            re.sub(r"\s+", " ", decoded).strip().lstrip("\ufeff")
+        )
 
     selectors = (
         ("property", "og:title"),

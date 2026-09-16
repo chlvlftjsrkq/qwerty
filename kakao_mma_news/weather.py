@@ -244,9 +244,14 @@ def _format_weather_report(report: dict[str, Any]) -> str:
     rain_clause = f", 강수확률 {rain_prob}%" if rain_prob is not None and rain_prob >= 40 else ""
     dust_sentence = f" {dust_clause}입니다." if dust_clause else ""
     temp_max = report["temp_max"]
+    weather_text = report["weather_text"]
+    if weather_text == "날씨":
+        if temp_max is not None:
+            return f"{report['location']}은 최고 {temp_max}도로 예상됩니다.{dust_sentence}"
+        return f"{report['location']} 날씨는 일부 정보를 확인하지 못했습니다.{dust_sentence}"
     if temp_max is not None:
-        return f"{report['location']}은 최고 {temp_max}도, {report['weather_text']}{rain_clause}입니다.{dust_sentence}"
-    return f"{report['location']}은 {report['weather_text']}{rain_clause}입니다.{dust_sentence}"
+        return f"{report['location']}은 최고 {temp_max}도, {weather_text}{rain_clause}입니다.{dust_sentence}"
+    return f"{report['location']}은 {weather_text}{rain_clause}입니다.{dust_sentence}"
 
 
 def _overall_short_advice(reports: list[dict[str, Any]]) -> str:

@@ -13,6 +13,7 @@ from scripts.publish_kakao_notice import (
     find_latest_outgoing_bubble,
     normalize_control_text,
     notice_marker,
+    post_notice_comment,
     prepare_notice_text,
     write_notice_comment_input,
 )
@@ -31,7 +32,6 @@ class KakaoNoticeTests(unittest.TestCase):
         self.assertEqual("첫 줄\n둘째 줄", normalize_control_text("  첫 줄\r\n둘째 줄\r\n"))
 
     @patch("scripts.publish_kakao_notice.time.sleep")
-    @patch("scripts.publish_kakao_notice.wait_for_value", return_value=True)
     @patch("scripts.publish_kakao_notice.window_box", return_value=Box(10, 20, 210, 80))
     @patch("scripts.publish_kakao_notice.pyperclip")
     @patch("scripts.publish_kakao_notice.pyautogui")
@@ -42,7 +42,6 @@ class KakaoNoticeTests(unittest.TestCase):
         pyautogui,
         pyperclip,
         _window_box,
-        _wait_for_value,
         _sleep,
     ) -> None:
         pyperclip.paste.return_value = "기존 클립보드"
@@ -60,6 +59,27 @@ class KakaoNoticeTests(unittest.TestCase):
             [call("음성요약\nhttps://example.test"), call("기존 클립보드")],
             pyperclip.copy.call_args_list,
         )
+
+    @patch("scripts.publish_kakao_notice.time.sleep")
+    @patch("scripts.publish_kakao_notice.wait_for_value", side_effect=[True, [303]])
+    @patch("scripts.publish_kakao_notice.window_box")
+    @patch("scripts.publish_kakao_notice.write_notice_comment_input")
+    @patch("scripts.publish_kakao_notice.pyautogui")
+    def test_notice_comment_clicks_register_and_waits_for_recreated_editor(
+        self,
+        pyautogui,
+        write_input,
+        window_box,
+        wait_for_value,
+        _sleep,
+    ) -> None:
+        window_box.side_effect = [Box(100, 100, 500, 700), Box(140, 650, 420, 680)]
+
+        post_notice_comment(101, 202, "음성요약\nhttps://example.test", 8.0)
+
+        write_input.assert_called_once_with(101, 202, "음성요약\nhttps://example.test", 8.0)
+        pyautogui.click.assert_called_once_with(460, 665)
+        self.assertEqual(2, wait_for_value.call_count)
 
     def test_latest_outgoing_bubble_survives_window_resize(self) -> None:
         for width, height in ((380, 662), (520, 760)):

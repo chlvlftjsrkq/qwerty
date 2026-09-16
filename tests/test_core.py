@@ -83,6 +83,29 @@ class CoreTests(unittest.TestCase):
             repair_korean_mojibake(broken),
         )
 
+    def test_article_page_title_repairs_cp949_mojibake(self):
+        html = '<meta property="og:title" content="¹ÚÀ§ CCTV ³í¶õ ¼Ó¡¦¾Æ³» ¼ÛÁöÀº, ¹æ¼Û Áß ´«¹°">'
+        self.assertEqual(
+            "박위 CCTV 논란 속…아내 송지은, 방송 중 눈물",
+            _meta_page_title(html),
+        )
+
+    def test_unknown_weather_code_does_not_render_weather_is_weather(self):
+        from kakao_mma_news.weather import _format_weather_report
+
+        report = {
+            "location": "인천",
+            "weather_text": "날씨",
+            "temp_max": 26,
+            "rain_prob": None,
+            "pm10": 33,
+            "pm25": 32,
+        }
+        self.assertEqual(
+            "인천은 최고 26도로 예상됩니다. 미세먼지 33(보통), 초미세먼지 32(보통)입니다.",
+            _format_weather_report(report),
+        )
+
     def test_codex_summary_rejects_missing_items_and_file_access_failure(self):
         article = Article(
             "병무청 정책 기사",
