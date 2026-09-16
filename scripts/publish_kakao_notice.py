@@ -195,6 +195,31 @@ def find_latest_notice_action_band(image: Image.Image, chat_region: Box) -> Box 
     return max(candidates, key=lambda band: band.bottom) if candidates else None
 
 
+def find_notice_comment_submit_button(image: Image.Image) -> Box | None:
+    """Find the enabled yellow Register button in a notice detail window."""
+    rgb = image.convert("RGB")
+    pixels = rgb.load()
+    scan_left = int(rgb.width * 0.55)
+    scan_top = max(0, rgb.height - max(180, int(rgb.height * 0.4)))
+    minimum_pixels = max(12, int(rgb.width * 0.03))
+    rows: list[tuple[int, int, int]] = []
+    for y in range(scan_top, rgb.height):
+        matches = [x for x in range(scan_left, rgb.width) if _is_yellow(pixels[x, y])]
+        if len(matches) >= minimum_pixels and max(matches) >= rgb.width - max(30, int(rgb.width * 0.08)):
+            rows.append((y, min(matches), max(matches)))
+
+    candidates = [
+        band
+        for band in _row_bands(rows)
+        if band.height >= 18
+        and band.height <= 80
+        and band.width >= 30
+        and band.width <= int(rgb.width * 0.4)
+        and band.left >= int(rgb.width * 0.6)
+    ]
+    return max(candidates, key=lambda band: (band.bottom, band.right)) if candidates else None
+
+
 def find_menu_separator_rows(image: Image.Image) -> list[int]:
     pixels = image.convert("RGB").load()
     left = max(2, image.width // 10)
@@ -500,9 +525,13 @@ def post_notice_comment(detail_hwnd: int, edit_hwnd: int, comment: str, wait_sec
         raise ValueError("The notice comment is unexpectedly long.")
 
     write_notice_comment_input(detail_hwnd, edit_hwnd, body, wait_seconds)
-    detail_box = window_box(detail_hwnd)
-    edit_box = window_box(edit_hwnd)
-    submit_point = ((edit_box.right + detail_box.right) // 2, edit_box.center[1])
+    submit_target = wait_for_value(
+        lambda: _notice_comment_submit_target(detail_hwnd),
+        min(wait_seconds, 3.0),
+    )
+    if not isinstance(submit_target, tuple) or len(submit_target) != 2:
+        raise RuntimeError("The enabled KakaoTalk notice comment Register button was not found safely.")
+    submit_point = (int(submit_target[0]), int(submit_target[1]))
     pyautogui.click(*submit_point)
     submitted = wait_for_value(
         lambda: not win32gui.IsWindow(edit_hwnd),
@@ -517,6 +546,19 @@ def post_notice_comment(detail_hwnd: int, edit_hwnd: int, comment: str, wait_sec
     if not replacement:
         raise RuntimeError("The KakaoTalk notice comment editor did not return after submission.")
     time.sleep(0.4)
+
+
+def _notice_comment_submit_target(detail_hwnd: int) -> tuple[int, int] | None:
+    if not win32gui.IsWindow(detail_hwnd) or not win32gui.IsWindowVisible(detail_hwnd):
+        return None
+    detail_box = window_box(detail_hwnd)
+    image = ImageGrab.grab(
+        (detail_box.left, detail_box.top, detail_box.right, detail_box.bottom)
+    ).convert("RGB")
+    button = find_notice_comment_submit_button(image)
+    if button is None:
+        return None
+    return detail_box.left + button.center[0], detail_box.top + button.center[1]
 
 
 def verify_notice_event(room: str, room_hwnd: int, list_hwnd: int, marker: str) -> bool:

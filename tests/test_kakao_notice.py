@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw
 
 from scripts.publish_kakao_notice import (
     Box,
+    find_notice_comment_submit_button,
     find_menu_separator_rows,
     find_notice_menu_center,
     find_latest_notice_action_band,
@@ -61,25 +62,36 @@ class KakaoNoticeTests(unittest.TestCase):
         )
 
     @patch("scripts.publish_kakao_notice.time.sleep")
-    @patch("scripts.publish_kakao_notice.wait_for_value", side_effect=[True, [303]])
-    @patch("scripts.publish_kakao_notice.window_box")
+    @patch("scripts.publish_kakao_notice.wait_for_value", side_effect=[(460, 665), True, [303]])
     @patch("scripts.publish_kakao_notice.write_notice_comment_input")
     @patch("scripts.publish_kakao_notice.pyautogui")
     def test_notice_comment_clicks_register_and_waits_for_recreated_editor(
         self,
         pyautogui,
         write_input,
-        window_box,
         wait_for_value,
         _sleep,
     ) -> None:
-        window_box.side_effect = [Box(100, 100, 500, 700), Box(140, 650, 420, 680)]
-
         post_notice_comment(101, 202, "음성요약\nhttps://example.test", 8.0)
 
         write_input.assert_called_once_with(101, 202, "음성요약\nhttps://example.test", 8.0)
         pyautogui.click.assert_called_once_with(460, 665)
-        self.assertEqual(2, wait_for_value.call_count)
+        self.assertEqual(3, wait_for_value.call_count)
+
+    def test_notice_comment_submit_button_is_detected_by_yellow_pixels(self) -> None:
+        image = Image.new("RGB", (377, 610), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((308, 566, 361, 595), radius=4, fill=(254, 229, 0))
+        draw.rectangle((20, 500, 90, 540), fill=(254, 229, 0))
+
+        self.assertEqual(Box(308, 566, 362, 596), find_notice_comment_submit_button(image))
+
+    def test_notice_comment_submit_button_rejects_inactive_gray_button(self) -> None:
+        image = Image.new("RGB", (377, 610), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((308, 566, 361, 595), radius=4, fill=(235, 235, 235))
+
+        self.assertIsNone(find_notice_comment_submit_button(image))
 
     def test_latest_outgoing_bubble_survives_window_resize(self) -> None:
         for width, height in ((380, 662), (520, 760)):
