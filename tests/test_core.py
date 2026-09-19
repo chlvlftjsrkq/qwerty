@@ -48,10 +48,12 @@ from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import (
     DEFAULT_TTS_PROVIDER,
     format_spoken_date,
+    join_pcm_chunks,
     markdown_to_speech,
     normalize_gemini_api_key,
     parse_pcm_mime_type,
     resolve_tts_provider,
+    split_gemini_tts_text,
     validate_date_label,
     write_pcm_wave,
 )
@@ -887,6 +889,33 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(2, wav_file.getsampwidth())
                 self.assertEqual(24000, wav_file.getframerate())
                 self.assertEqual(2400, wav_file.getnframes())
+
+    def test_gemini_tts_text_is_split_on_sentence_boundaries(self):
+        paragraph = "병무청 주요 소식을 전해드립니다. 병역판정검사 일정이 안내됐습니다. "
+        text = "\n\n".join([paragraph * 12, paragraph * 12, paragraph * 12])
+
+        chunks = split_gemini_tts_text(text, max_chars=500)
+
+        self.assertGreaterEqual(len(chunks), 3)
+        self.assertTrue(all(0 < len(chunk) <= 500 for chunk in chunks))
+        self.assertEqual(
+            re.sub(r"\s+", "", text),
+            re.sub(r"\s+", "", " ".join(chunks)),
+        )
+
+    def test_pcm_chunks_are_joined_with_a_short_silence(self):
+        first = b"\x01\x00" * 10
+        second = b"\x02\x00" * 10
+
+        joined = join_pcm_chunks(
+            [first, second],
+            sample_rate=100,
+            channels=1,
+            sample_width=2,
+            pause_seconds=0.25,
+        )
+
+        self.assertEqual(first + (b"\x00\x00" * 25) + second, joined)
 
     def test_gemini_api_key_normalization_removes_powershell_bom(self):
         self.assertEqual("test-api-key", normalize_gemini_api_key("\ufefftest-api-key\r\n"))

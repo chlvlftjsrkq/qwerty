@@ -21,6 +21,8 @@ DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 DEFAULT_GEMINI_TTS_VOICE = "Kore"
 DEFAULT_GEMINI_TTS_START_DATE = "2026-07-15"
 DEFAULT_TTS_PROVIDER = "gemini"
+DEFAULT_GEMINI_TTS_CHUNK_CHARS = 1500
+GEMINI_TTS_CHUNK_PAUSE_SECONDS = 0.35
 
 
 NUMBER_WORDS = {
@@ -147,7 +149,13 @@ def parse_args() -> argparse.Namespace:
         "--gemini-timeout-seconds",
         type=float,
         default=float(os.getenv("GEMINI_TTS_TIMEOUT_SECONDS", "300")),
-        help="Gemini TTS request timeout.",
+        help="Gemini TTS request timeout for each audio chunk.",
+    )
+    parser.add_argument(
+        "--gemini-chunk-chars",
+        type=int,
+        default=int(os.getenv("GEMINI_TTS_CHUNK_CHARS", str(DEFAULT_GEMINI_TTS_CHUNK_CHARS))),
+        help="Maximum characters sent in one Gemini TTS request.",
     )
     parser.add_argument("--ffmpeg-command", default=os.getenv("FFMPEG_COMMAND", "ffmpeg"), help="ffmpeg command or path.")
     parser.add_argument("--ffprobe-command", default=os.getenv("FFPROBE_COMMAND", "ffprobe"), help="ffprobe command or path.")
@@ -330,6 +338,56 @@ def split_sentences(text: str) -> list[str]:
         return []
     sentences = re.findall(r"[^.!?。]+[.!?。]?", text)
     return [normalize_space(sentence) for sentence in sentences if normalize_space(sentence)]
+
+
+def _split_long_tts_unit(text: str, max_chars: int) -> list[str]:
+    parts: list[str] = []
+    remaining = normalize_space(text)
+    while len(remaining) > max_chars:
+        window = remaining[: max_chars + 1]
+        split_at = max(window.rfind(" "), window.rfind(","), window.rfind("，"))
+        if split_at < max_chars // 2:
+            split_at = max_chars
+        part = remaining[:split_at].strip()
+        if part:
+            parts.append(part)
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        parts.append(remaining)
+    return parts
+
+
+def split_gemini_tts_text(text: str, max_chars: int = DEFAULT_GEMINI_TTS_CHUNK_CHARS) -> list[str]:
+    if max_chars < 200:
+        raise ValueError("Gemini TTS chunk size must be at least 200 characters.")
+
+    paragraphs = [
+        normalize_space(paragraph)
+        for paragraph in re.split(r"\n\s*\n+", text.strip())
+        if normalize_space(paragraph)
+    ]
+    units: list[tuple[str, bool]] = []
+    for paragraph in paragraphs:
+        sentences = split_sentences(paragraph) or [paragraph]
+        first_unit = True
+        for sentence in sentences:
+            for part in _split_long_tts_unit(sentence, max_chars):
+                units.append((part, first_unit))
+                first_unit = False
+
+    chunks: list[str] = []
+    current = ""
+    for unit, starts_paragraph in units:
+        separator = "\n\n" if current and starts_paragraph else (" " if current else "")
+        candidate = f"{current}{separator}{unit}"
+        if current and len(candidate) > max_chars:
+            chunks.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def trim_text(text: str, limit: int) -> str:
@@ -1128,6 +1186,26 @@ def write_pcm_wave(
         wav_file.writeframes(pcm)
 
 
+def join_pcm_chunks(
+    chunks: list[bytes],
+    sample_rate: int,
+    channels: int,
+    sample_width: int,
+    pause_seconds: float = GEMINI_TTS_CHUNK_PAUSE_SECONDS,
+) -> bytes:
+    if not chunks:
+        raise RuntimeError("Gemini TTS did not produce any PCM chunks.")
+    frame_width = channels * sample_width
+    if sample_rate <= 0 or frame_width <= 0 or pause_seconds < 0:
+        raise ValueError("Invalid PCM join parameters.")
+    for chunk in chunks:
+        if not chunk or len(chunk) % frame_width != 0:
+            raise RuntimeError("Gemini PCM chunk is not aligned to complete audio frames.")
+    pause_frames = round(sample_rate * pause_seconds)
+    silence = b"\x00" * (pause_frames * frame_width)
+    return silence.join(chunks)
+
+
 def resolve_media_command(command: str) -> str:
     candidate = Path(command).expanduser()
     if candidate.is_file():
@@ -1156,6 +1234,8 @@ def transcode_wave_to_mp3(wav_path: Path, output_path: Path, ffmpeg_command: str
             "1",
             "-ar",
             "24000",
+            "-af",
+            "loudnorm=I=-18:LRA=7:TP=-2",
             "-codec:a",
             "libmp3lame",
             "-b:a",
@@ -1221,17 +1301,45 @@ async def synthesize_gemini(
     model: str,
     voice: str,
     timeout_seconds: float,
+    chunk_chars: int,
     ffmpeg_command: str,
     ffprobe_command: str,
 ) -> dict[str, Any]:
     def generate() -> dict[str, Any]:
-        pcm, mime_type = request_gemini_pcm(text, api_key, model, voice, timeout_seconds)
-        sample_rate, channels, sample_width = parse_pcm_mime_type(mime_type)
+        text_chunks = split_gemini_tts_text(text, chunk_chars)
+        if not text_chunks:
+            raise RuntimeError("Gemini TTS narration is empty.")
+
+        pcm_chunks: list[bytes] = []
+        audio_format: tuple[int, int, int] | None = None
+        for index, text_chunk in enumerate(text_chunks, start=1):
+            print(
+                f"Gemini TTS chunk {index}/{len(text_chunks)}: {len(text_chunk)} characters",
+                file=sys.stderr,
+            )
+            pcm, mime_type = request_gemini_pcm(text_chunk, api_key, model, voice, timeout_seconds)
+            chunk_format = parse_pcm_mime_type(mime_type)
+            if audio_format is None:
+                audio_format = chunk_format
+            elif chunk_format != audio_format:
+                raise RuntimeError(
+                    f"Gemini TTS PCM format changed between chunks: {audio_format} -> {chunk_format}"
+                )
+            pcm_chunks.append(pcm)
+
+        if audio_format is None:
+            raise RuntimeError("Gemini TTS did not return an audio format.")
+        sample_rate, channels, sample_width = audio_format
+        pcm = join_pcm_chunks(pcm_chunks, sample_rate, channels, sample_width)
         with tempfile.TemporaryDirectory(prefix="gemini-tts-") as temp_dir:
             wav_path = Path(temp_dir) / "gemini-tts.wav"
             write_pcm_wave(pcm, wav_path, sample_rate, channels, sample_width)
             transcode_wave_to_mp3(wav_path, output_path, ffmpeg_command)
-        return probe_mp3(output_path, ffprobe_command)
+        probe = probe_mp3(output_path, ffprobe_command)
+        probe["gemini_chunk_count"] = len(text_chunks)
+        probe["gemini_chunk_characters"] = [len(chunk) for chunk in text_chunks]
+        probe["gemini_chunk_pause_seconds"] = GEMINI_TTS_CHUNK_PAUSE_SECONDS
+        return probe
 
     return await asyncio.to_thread(generate)
 
@@ -1325,6 +1433,7 @@ async def build() -> int:
                 model=args.gemini_model,
                 voice=args.gemini_voice,
                 timeout_seconds=args.gemini_timeout_seconds,
+                chunk_chars=args.gemini_chunk_chars,
                 ffmpeg_command=args.ffmpeg_command,
                 ffprobe_command=args.ffprobe_command,
             )
