@@ -21,7 +21,7 @@ DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 DEFAULT_GEMINI_TTS_VOICE = "Kore"
 DEFAULT_GEMINI_TTS_START_DATE = "2026-07-15"
 DEFAULT_TTS_PROVIDER = "gemini"
-DEFAULT_GEMINI_TTS_CHUNK_CHARS = 1500
+DEFAULT_GEMINI_TTS_CHUNK_CHARS = 650
 GEMINI_TTS_CHUNK_PAUSE_SECONDS = 0.35
 
 
@@ -1311,6 +1311,7 @@ async def synthesize_gemini(
             raise RuntimeError("Gemini TTS narration is empty.")
 
         pcm_chunks: list[bytes] = []
+        chunk_durations: list[float] = []
         audio_format: tuple[int, int, int] | None = None
         for index, text_chunk in enumerate(text_chunks, start=1):
             print(
@@ -1326,6 +1327,13 @@ async def synthesize_gemini(
                     f"Gemini TTS PCM format changed between chunks: {audio_format} -> {chunk_format}"
                 )
             pcm_chunks.append(pcm)
+            sample_rate, channels, sample_width = chunk_format
+            duration_seconds = len(pcm) / (sample_rate * channels * sample_width)
+            chunk_durations.append(round(duration_seconds, 3))
+            print(
+                f"Gemini TTS chunk {index}/{len(text_chunks)} audio: {duration_seconds:.1f} seconds",
+                file=sys.stderr,
+            )
 
         if audio_format is None:
             raise RuntimeError("Gemini TTS did not return an audio format.")
@@ -1338,6 +1346,7 @@ async def synthesize_gemini(
         probe = probe_mp3(output_path, ffprobe_command)
         probe["gemini_chunk_count"] = len(text_chunks)
         probe["gemini_chunk_characters"] = [len(chunk) for chunk in text_chunks]
+        probe["gemini_chunk_duration_seconds"] = chunk_durations
         probe["gemini_chunk_pause_seconds"] = GEMINI_TTS_CHUNK_PAUSE_SECONDS
         return probe
 
