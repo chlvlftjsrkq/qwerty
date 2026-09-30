@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import tempfile
@@ -47,6 +48,8 @@ from kakao_mma_news.summarize import (
 from kakao_mma_news.weather import build_weather_summary
 from scripts.build_podcast_audio import (
     DEFAULT_TTS_PROVIDER,
+    _clean_llm_script,
+    _validate_llm_script,
     format_spoken_date,
     join_pcm_chunks,
     markdown_to_speech,
@@ -54,6 +57,7 @@ from scripts.build_podcast_audio import (
     parse_pcm_mime_type,
     resolve_tts_provider,
     split_gemini_tts_text,
+    synthesize_gemini,
     validate_date_label,
     write_pcm_wave,
 )
@@ -890,18 +894,112 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(24000, wav_file.getframerate())
                 self.assertEqual(2400, wav_file.getnframes())
 
-    def test_gemini_tts_text_is_split_on_sentence_boundaries(self):
-        paragraph = "병무청 주요 소식을 전해드립니다. 병역판정검사 일정이 안내됐습니다. "
-        text = "\n\n".join([paragraph * 12, paragraph * 12, paragraph * 12])
+    def test_gemini_tts_text_keeps_whole_articles_together(self):
+        paragraphs = [
+            f"{index} 번째 기사입니다. " + "병역판정검사 일정이 안내됐습니다. " * 16
+            for index in range(1, 4)
+        ]
+        paragraphs = [paragraph.strip() for paragraph in paragraphs]
+        text = "\n\n".join(paragraphs)
 
         chunks = split_gemini_tts_text(text, max_chars=500)
 
-        self.assertGreaterEqual(len(chunks), 3)
-        self.assertTrue(all(0 < len(chunk) <= 500 for chunk in chunks))
-        self.assertEqual(
-            re.sub(r"\s+", "", text),
-            re.sub(r"\s+", "", " ".join(chunks)),
+        self.assertEqual(paragraphs, chunks)
+        self.assertEqual(text, "\n\n".join(chunks))
+
+    def test_gemini_tts_keeps_oversized_paragraph_and_sentence_intact(self):
+        long_paragraph = "중간에 자르면 안 되는 같은 기사 내용 " * 50 + "입니다."
+        paragraphs = ["병무청 소식입니다.", long_paragraph, "마지막 소식입니다."]
+
+        chunks = split_gemini_tts_text("\n\n".join(paragraphs), max_chars=650)
+
+        self.assertGreater(len(long_paragraph), 650)
+        self.assertEqual(paragraphs, chunks)
+
+    def test_gemini_tts_packs_short_paragraphs_without_losing_boundaries(self):
+        first = "첫 소식입니다. " * 10
+        second = "다음 소식입니다. " * 10
+        third = "마지막 소식입니다. " * 10
+        chunks = split_gemini_tts_text("\n\n".join([first, second, third]), max_chars=200)
+
+        self.assertEqual([first.strip() + "\n\n" + second.strip(), third.strip()], chunks)
+
+    def test_gemini_tts_preserves_line_wrapped_paragraph_and_decimal(self):
+        for newline in ("\n", "\r\n", "\r"):
+            with self.subTest(newline=newline):
+                text = f"수치는 3.1입니다.{newline}같은 기사의 상세 내용입니다.{newline} \t{newline}다음 기사입니다."
+                self.assertEqual(
+                    ["수치는 3.1입니다. 같은 기사의 상세 내용입니다.\n\n다음 기사입니다."],
+                    split_gemini_tts_text(text),
+                )
+
+    def test_gemini_tts_empty_text_and_invalid_target(self):
+        self.assertEqual([], split_gemini_tts_text(" \r\n\t\n "))
+        with self.assertRaises(ValueError):
+            split_gemini_tts_text("소식입니다.", max_chars=199)
+
+    def test_podcast_llm_cleanup_preserves_article_paragraphs(self):
+        raw = (
+            "```text\r\n병무청 소식입니다.\r\n오늘은 두 가지 소식을 전해드립니다.\r\n\r\n"
+            "첫 기사입니다.\r\n수치는 3.1입니다. 자세히 안내했습니다...\r\n\r\n---\r\n\r\n"
+            "다음 기사입니다.\r\n신청 기간을 확인해 주세요.\r\n\r\n마치겠습니다.\r\n```"
         )
+        cleaned = _clean_llm_script(raw)
+        self.assertEqual([
+            "병무청 소식입니다. 오늘은 두 가지 소식을 전해드립니다.",
+            "첫 기사입니다. 수치는 3.1입니다. 자세히 안내했습니다",
+            "다음 기사입니다. 신청 기간을 확인해 주세요.",
+            "마치겠습니다.",
+        ], cleaned.split("\n\n"))
+
+    def test_podcast_llm_script_requires_one_paragraph_per_article(self):
+        paragraphs = [
+            "병무청 뉴스 음성 브리핑입니다. 오늘은 주요 기사 두 건을 전해드립니다.",
+            "첫 소식입니다. 병역판정검사 일정을 안내했습니다. 검사 장소와 준비물을 확인해 주세요.",
+            "다음 소식입니다. 현역병 모집을 시작했습니다. 지원 조건과 접수 일정을 확인해 주세요.",
+            "자세한 내용은 병무청 공식 안내를 확인하시기 바랍니다.",
+        ]
+        _validate_llm_script("\n\n".join(paragraphs), "병무청", article_count=2)
+        for invalid in (" ".join(paragraphs), "\n".join(paragraphs), "\n\n".join(paragraphs).replace("검사 장소", "\n\n검사 장소")):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(RuntimeError, "문단"):
+                    _validate_llm_script(invalid, "병무청", article_count=2)
+
+    def test_podcast_fallback_preserves_article_paragraphs(self):
+        summary = (
+            "🪖 2026-09-29 병무청 뉴스 브리핑\n"
+            "1️⃣ 병역판정검사 일정 안내\n병무청이 검사 일정을 안내했습니다. 준비물을 확인해 주세요.\n"
+            "2️⃣ 현역병 모집 안내\n병무청이 현역병 모집을 시작했습니다. 지원 조건을 확인해 주세요.\n"
+        )
+        speech = markdown_to_speech(summary, "2026-09-29")
+        paragraphs = speech.split("\n\n")
+        chunks = split_gemini_tts_text(speech, max_chars=200)
+
+        self.assertEqual(5, len(paragraphs))
+        self.assertTrue(paragraphs[2].startswith("첫 번째 소식입니다."))
+        self.assertTrue(paragraphs[3].startswith("다음 소식입니다."))
+        self.assertEqual(paragraphs, [p for chunk in chunks for p in chunk.split("\n\n")])
+
+    def test_gemini_synthesis_submits_whole_paragraphs_with_same_voice(self):
+        paragraphs = [f"{index} 번째 소식입니다. " + "같은 기사 설명입니다. " * 50 for index in range(1, 3)]
+        pcm = b"\x01\x00" * 24000
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "scripts.build_podcast_audio.request_gemini_pcm",
+            return_value=(pcm, "audio/l16;rate=24000;channels=1"),
+        ) as request, patch("scripts.build_podcast_audio.transcode_wave_to_mp3") as transcode, patch(
+            "scripts.build_podcast_audio.probe_mp3", return_value={"codec": "mp3"}
+        ):
+            result = asyncio.run(synthesize_gemini(
+                text="\n\n".join(paragraphs), output_path=Path(temp_dir) / "test.mp3",
+                api_key="test-key", model="test-model", voice="Kore", timeout_seconds=30,
+                chunk_chars=650, ffmpeg_command="ffmpeg", ffprobe_command="ffprobe",
+            ))
+
+        self.assertEqual([paragraph.strip() for paragraph in paragraphs], [call.args[0] for call in request.call_args_list])
+        self.assertTrue(all(call.args[3] == "Kore" for call in request.call_args_list))
+        self.assertEqual([1, 1], result["gemini_chunk_paragraph_counts"])
+        self.assertEqual(2, result["gemini_chunk_count"])
+        transcode.assert_called_once()
 
     def test_pcm_chunks_are_joined_with_a_short_silence(self):
         first = b"\x01\x00" * 10

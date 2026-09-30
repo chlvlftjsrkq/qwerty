@@ -155,7 +155,7 @@ def parse_args() -> argparse.Namespace:
         "--gemini-chunk-chars",
         type=int,
         default=int(os.getenv("GEMINI_TTS_CHUNK_CHARS", str(DEFAULT_GEMINI_TTS_CHUNK_CHARS))),
-        help="Maximum characters sent in one Gemini TTS request.",
+        help="Target characters per Gemini TTS request; whole paragraphs are never split to meet this target.",
     )
     parser.add_argument("--ffmpeg-command", default=os.getenv("FFMPEG_COMMAND", "ffmpeg"), help="ffmpeg command or path.")
     parser.add_argument("--ffprobe-command", default=os.getenv("FFPROBE_COMMAND", "ffprobe"), help="ffprobe command or path.")
@@ -340,49 +340,27 @@ def split_sentences(text: str) -> list[str]:
     return [normalize_space(sentence) for sentence in sentences if normalize_space(sentence)]
 
 
-def _split_long_tts_unit(text: str, max_chars: int) -> list[str]:
-    parts: list[str] = []
-    remaining = normalize_space(text)
-    while len(remaining) > max_chars:
-        window = remaining[: max_chars + 1]
-        split_at = max(window.rfind(" "), window.rfind(","), window.rfind("，"))
-        if split_at < max_chars // 2:
-            split_at = max_chars
-        part = remaining[:split_at].strip()
-        if part:
-            parts.append(part)
-        remaining = remaining[split_at:].strip()
-    if remaining:
-        parts.append(remaining)
-    return parts
+def _tts_paragraphs(text: str) -> list[str]:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return [
+        normalize_space(paragraph)
+        for paragraph in re.split(r"\n\s*\n+", text.strip())
+        if normalize_space(paragraph)
+    ]
 
 
 def split_gemini_tts_text(text: str, max_chars: int = DEFAULT_GEMINI_TTS_CHUNK_CHARS) -> list[str]:
     if max_chars < 200:
         raise ValueError("Gemini TTS chunk size must be at least 200 characters.")
 
-    paragraphs = [
-        normalize_space(paragraph)
-        for paragraph in re.split(r"\n\s*\n+", text.strip())
-        if normalize_space(paragraph)
-    ]
-    units: list[tuple[str, bool]] = []
-    for paragraph in paragraphs:
-        sentences = split_sentences(paragraph) or [paragraph]
-        first_unit = True
-        for sentence in sentences:
-            for part in _split_long_tts_unit(sentence, max_chars):
-                units.append((part, first_unit))
-                first_unit = False
-
     chunks: list[str] = []
     current = ""
-    for unit, starts_paragraph in units:
-        separator = "\n\n" if current and starts_paragraph else (" " if current else "")
-        candidate = f"{current}{separator}{unit}"
+    # The size is a soft target: a voice change must never interrupt an article.
+    for paragraph in _tts_paragraphs(text):
+        candidate = f"{current}\n\n{paragraph}" if current else paragraph
         if current and len(candidate) > max_chars:
             chunks.append(current)
-            current = unit
+            current = paragraph
         else:
             current = candidate
     if current:
@@ -835,7 +813,7 @@ def markdown_to_speech(
         if weather:
             lines.append(weather)
         lines.append(f"네이버 뉴스 기준으로 공유할 만한 {agency_name} 관련 주요 기사가 확인되지 않았습니다.")
-        return "\n".join(lines)
+        return "\n\n".join(lines)
 
     opening = f"오늘은 주요 기사 {len(articles)} 건을 제목과 핵심 내용 중심으로 전해드리겠습니다."
     lines = build_compact_lines(articles, max_chars=max_chars - len(intro) - len(opening) - 40)
@@ -846,7 +824,7 @@ def markdown_to_speech(
     if weather:
         output.append(weather)
     output.extend([opening, *lines, closing])
-    return "\n".join(output)
+    return "\n\n".join(output)
 
 
 def _strip_code_fence(text: str) -> str:
@@ -887,14 +865,12 @@ def resolve_tts_provider(
 
 def _clean_llm_script(text: str) -> str:
     text = _strip_code_fence(text).replace("\r\n", "\n").replace("\r", "\n")
-    lines = [normalize_space(line) for line in text.splitlines()]
-    cleaned = "\n".join(line for line in lines if line)
-    cleaned = remove_ellipsis(cleaned)
-    cleaned = re.sub(r"(?m)^[-#]{2,}\s*$", "", cleaned)
-    return normalize_space(cleaned).replace(". ", ".\n")
+    text = re.sub(r"(?m)^[ \t]*[-#]{2,}[ \t]*$", "", text)
+    paragraphs = [remove_ellipsis(paragraph) for paragraph in _tts_paragraphs(text)]
+    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
 
 
-def _validate_llm_script(text: str, agency_name: str) -> None:
+def _validate_llm_script(text: str, agency_name: str, article_count: int | None = None) -> None:
     if len(text) < 120:
         raise RuntimeError("LLM 음성 스크립트가 너무 짧습니다.")
     forbidden = ("제목은", "주요 내용입니다", "관련 보도입니다", "Source:", "http://", "https://")
@@ -903,6 +879,8 @@ def _validate_llm_script(text: str, agency_name: str) -> None:
         raise RuntimeError(f"LLM 음성 스크립트에 금지 표현이 포함됐습니다: {', '.join(found)}")
     if agency_name and agency_name not in text[:120]:
         raise RuntimeError("LLM 음성 스크립트 도입부에서 기관명을 찾지 못했습니다.")
+    if article_count is not None and len(_tts_paragraphs(text)) != article_count + 2:
+        raise RuntimeError("LLM 음성 스크립트는 도입부, 기사별 한 문단, 마무리 문단으로 구분해야 합니다.")
 
 
 def podcast_script_payload(
@@ -966,6 +944,9 @@ def podcast_script_with_codex(
             "Open with the spoken date, agency name, and that this is a news audio briefing.",
             "Mention the article count once near the beginning.",
             "For each article, write a smooth short segment.",
+            "Paragraph structure is mandatory: one opening paragraph, exactly one paragraph per article in input order, then one closing paragraph.",
+            "Separate these paragraphs with one blank line. Keep the transition, lead, and all body sentences for the same article together in a single paragraph without blank lines inside it.",
+            "Put the date, agency name, article count, and any opening information together in the opening paragraph. Do not combine different articles into one paragraph.",
             "Each segment must start with a varied transition such as 첫 번째 소식입니다, 다음 소식입니다, 이어서 전해드립니다, or 마지막 소식입니다.",
             "After the transition, write at least three connected sentences for that article.",
             "The first sentence must synthesize the article title and article body into one natural news lead. Do not merely read or restate the raw title.",
@@ -1020,7 +1001,7 @@ def podcast_script_with_codex(
             )
             raise RuntimeError(f"Codex CLI 음성 스크립트 생성 실패(exit {result.returncode}): {details}")
         script = _clean_llm_script(output_path.read_text(encoding="utf-8"))
-        _validate_llm_script(script, str(payload["agency_name"]))
+        _validate_llm_script(script, str(payload["agency_name"]), article_count=len(payload["articles"]))
         return script
     finally:
         for path in (output_path,):
@@ -1346,6 +1327,7 @@ async def synthesize_gemini(
         probe = probe_mp3(output_path, ffprobe_command)
         probe["gemini_chunk_count"] = len(text_chunks)
         probe["gemini_chunk_characters"] = [len(chunk) for chunk in text_chunks]
+        probe["gemini_chunk_paragraph_counts"] = [len(_tts_paragraphs(chunk)) for chunk in text_chunks]
         probe["gemini_chunk_duration_seconds"] = chunk_durations
         probe["gemini_chunk_pause_seconds"] = GEMINI_TTS_CHUNK_PAUSE_SECONDS
         return probe
