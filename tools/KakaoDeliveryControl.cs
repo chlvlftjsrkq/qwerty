@@ -1,10 +1,12 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
 
 namespace Qwerty.KakaoDeliveryControl
 {
@@ -332,7 +334,21 @@ namespace Qwerty.KakaoDeliveryControl
 
         internal static BriefingDispatchResult Run()
         {
-            string scriptPath = Path.Combine(ProjectRoot, "scripts", "dispatch_today_bma_briefing.ps1");
+            return RunScript("dispatch_today_bma_briefing.ps1", "");
+        }
+
+        internal static BriefingDispatchResult ResumeSaved(string bundleId)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(bundleId, "^[A-Za-z0-9_-]+$"))
+            {
+                throw new ArgumentException("저장된 브리핑 번호가 올바르지 않습니다.");
+            }
+            return RunScript("resend_saved_briefing.ps1", " -BundleId \"" + bundleId + "\"");
+        }
+
+        private static BriefingDispatchResult RunScript(string name, string arguments)
+        {
+            string scriptPath = Path.Combine(ProjectRoot, "scripts", name);
             if (!File.Exists(scriptPath))
             {
                 throw new FileNotFoundException("오늘 브리핑 실행 파일을 찾지 못했습니다.", scriptPath);
@@ -341,7 +357,7 @@ namespace Qwerty.KakaoDeliveryControl
             var startInfo = new ProcessStartInfo
             {
                 FileName = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + scriptPath + "\"",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + scriptPath + "\" -ProjectRoot \"" + ProjectRoot + "\"" + arguments,
                 WorkingDirectory = ProjectRoot,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -358,16 +374,93 @@ namespace Qwerty.KakaoDeliveryControl
                 {
                     throw new InvalidOperationException("오늘 브리핑 작업을 시작하지 못했습니다.");
                 }
-                string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
+                var output = new StringBuilder();
+                var error = new StringBuilder();
+                process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) output.AppendLine(e.Data); };
+                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) error.AppendLine(e.Data); };
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
                 process.WaitForExit();
-                string detail = string.IsNullOrWhiteSpace(error) ? output : error;
+                string detail = error.Length == 0 ? output.ToString() : error.ToString();
                 return new BriefingDispatchResult
                 {
                     ExitCode = process.ExitCode,
                     Output = detail.Trim()
                 };
             }
+        }
+    }
+
+    internal sealed class SavedBriefing
+    {
+        internal string Id;
+        internal string DateLabel;
+        internal string Agency;
+        internal string Room;
+        internal string CreatedAt;
+        internal string Status;
+        internal string Remaining;
+        internal bool FilesReady;
+
+        internal static string OutboxDirectory
+        {
+            get
+            {
+                string configured = Environment.GetEnvironmentVariable("QWERTY_BRIEFING_OUTBOX");
+                return string.IsNullOrWhiteSpace(configured)
+                    ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "qwerty", "briefing-outbox")
+                    : Environment.ExpandEnvironmentVariables(configured);
+            }
+        }
+
+        public override string ToString()
+        {
+            DateTimeOffset created;
+            string time = DateTimeOffset.TryParse(CreatedAt, out created) ? created.ToLocalTime().ToString("MM/dd HH:mm") : "";
+            return DateLabel.Replace("~", " ~ ") + " " + Agency + " · " + time;
+        }
+
+        internal static List<SavedBriefing> Load()
+        {
+            var result = new List<SavedBriefing>();
+            if (!Directory.Exists(OutboxDirectory)) return result;
+            foreach (string directory in Directory.GetDirectories(OutboxDirectory, "briefing-*"))
+            {
+                try
+                {
+                    string json;
+                    using (var stream = new FileStream(Path.Combine(directory, "delivery.json"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    {
+                        json = reader.ReadToEnd();
+                    }
+                    var data = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+                    if (Convert.ToInt32(data["schema_version"]) != 1 || Convert.ToString(data["status"]) == "superseded") continue;
+                    var remaining = new List<string>();
+                    foreach (object item in (System.Collections.IEnumerable)data["steps"])
+                    {
+                        var step = (Dictionary<string, object>)item;
+                        if (Convert.ToString(step["status"]) == "sent") continue;
+                        string stage = Convert.ToString(step["stage"]);
+                        string label = stage == "image" ? "이미지" : stage == "summary" ? "본문" : stage == "notice" ? "공지·댓글" : "음성 링크";
+                        if (!remaining.Contains(label)) remaining.Add(label);
+                    }
+                    bool filesReady = true;
+                    foreach (string file in ((Dictionary<string, object>)data["sha256"]).Keys)
+                    {
+                        if (Path.GetFileName(file) != file || !File.Exists(Path.Combine(directory, file))) filesReady = false;
+                    }
+                    result.Add(new SavedBriefing {
+                        Id = Convert.ToString(data["bundle_id"]), DateLabel = Convert.ToString(data["date_label"]),
+                        Agency = Convert.ToString(data["agency"]), Room = Convert.ToString(data["room"]),
+                        CreatedAt = Convert.ToString(data["created_at"]), Status = Convert.ToString(data["status"]),
+                        Remaining = string.Join(", ", remaining.ToArray()), FilesReady = filesReady
+                    });
+                }
+                catch { }
+            }
+            result.Sort(delegate(SavedBriefing a, SavedBriefing b) { return string.CompareOrdinal(b.CreatedAt, a.CreatedAt); });
+            return result;
         }
     }
 
@@ -383,12 +476,21 @@ namespace Qwerty.KakaoDeliveryControl
         private readonly Button runnerStopButton;
         private readonly Label briefingStatusLabel;
         private readonly Button briefingSendButton;
+        private readonly ComboBox savedBriefingPicker;
+        private readonly Label savedBriefingDetailLabel;
+        private readonly Label savedBriefingStatusLabel;
+        private readonly Button savedBriefingSendButton;
+        private readonly ToolTip controlToolTip = new ToolTip();
+        private bool savedBriefingSending;
+        private bool briefingDispatching;
         private readonly System.Windows.Forms.Timer refreshTimer;
 
         internal ControlForm()
         {
-            Text = "qwerty 자동화 제어";
-            ClientSize = new Size(570, 660);
+            Text = "AI 병무청 데일리 모닝톡 자동화 제어";
+            ClientSize = new Size(570, Math.Min(810, Screen.PrimaryScreen.WorkingArea.Height - 60));
+            AutoScroll = true;
+            AutoScrollMinSize = new Size(550, 810);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -401,7 +503,7 @@ namespace Qwerty.KakaoDeliveryControl
                 Location = new Point(22, 16),
                 Size = new Size(525, 34),
                 Font = new Font("Malgun Gothic", 16F, FontStyle.Bold, GraphicsUnit.Point),
-                Text = "qwerty 자동화 제어"
+                Text = "AI 병무청 데일리 모닝톡 자동화 제어"
             };
 
             var deliveryGroup = new GroupBox
@@ -454,7 +556,7 @@ namespace Qwerty.KakaoDeliveryControl
             var briefingGroup = new GroupBox
             {
                 Location = new Point(20, 252),
-                Size = new Size(530, 135),
+                Size = new Size(530, 295),
                 Text = "오늘 병무청 브리핑"
             };
 
@@ -462,7 +564,7 @@ namespace Qwerty.KakaoDeliveryControl
             {
                 AutoSize = false,
                 Location = new Point(18, 29),
-                Size = new Size(305, 55),
+                Size = new Size(305, 68),
                 ForeColor = Color.FromArgb(75, 75, 75),
                 Text = "아침 예약을 놓쳤을 때 오늘 브리핑을 새로 생성해 이미지, 본문, 음성 링크를 모닝톡방에 보냅니다."
             };
@@ -479,7 +581,7 @@ namespace Qwerty.KakaoDeliveryControl
             briefingStatusLabel = new Label
             {
                 AutoSize = false,
-                Location = new Point(18, 94),
+                Location = new Point(18, 104),
                 Size = new Size(490, 25),
                 ForeColor = Color.FromArgb(75, 75, 75),
                 Text = "상태: 대기 중"
@@ -489,9 +591,43 @@ namespace Qwerty.KakaoDeliveryControl
             briefingGroup.Controls.Add(briefingSendButton);
             briefingGroup.Controls.Add(briefingStatusLabel);
 
+            var savedBriefingTitle = new Label
+            {
+                Location = new Point(18, 140), Size = new Size(490, 24),
+                Text = "생성 완료 · 전송 미완료 브리핑", Font = new Font(Font, FontStyle.Bold)
+            };
+            savedBriefingPicker = new ComboBox
+            {
+                Location = new Point(18, 169), Size = new Size(490, 30),
+                DropDownStyle = ComboBoxStyle.DropDownList, IntegralHeight = false, DropDownHeight = 160
+            };
+            savedBriefingPicker.SelectedIndexChanged += delegate { UpdateSavedBriefingDetails(); };
+            savedBriefingDetailLabel = new Label
+            {
+                Location = new Point(18, 209), Size = new Size(303, 52),
+                ForeColor = Color.FromArgb(75, 75, 75)
+            };
+            savedBriefingSendButton = new Button
+            {
+                Location = new Point(330, 207), Size = new Size(180, 52),
+                Text = "저장본 이어 보내기", UseVisualStyleBackColor = true, Enabled = false
+            };
+            savedBriefingSendButton.Click += SavedBriefingSendButtonClick;
+            controlToolTip.SetToolTip(savedBriefingSendButton, "저장된 자료로 전송만 이어갑니다. 공지 재시도 시 해당 본문을 다시 게시한 뒤 등록합니다.");
+            savedBriefingStatusLabel = new Label
+            {
+                Location = new Point(18, 266), Size = new Size(490, 22),
+                ForeColor = Color.FromArgb(75, 75, 75)
+            };
+            briefingGroup.Controls.Add(savedBriefingTitle);
+            briefingGroup.Controls.Add(savedBriefingPicker);
+            briefingGroup.Controls.Add(savedBriefingDetailLabel);
+            briefingGroup.Controls.Add(savedBriefingSendButton);
+            briefingGroup.Controls.Add(savedBriefingStatusLabel);
+
             var runnerGroup = new GroupBox
             {
-                Location = new Point(20, 401),
+                Location = new Point(20, 561),
                 Size = new Size(530, 225),
                 Text = "GitHub Actions 러너"
             };
@@ -555,7 +691,7 @@ namespace Qwerty.KakaoDeliveryControl
             refreshTimer.Tick += delegate { RefreshState(); };
             refreshTimer.Start();
 
-            FormClosed += delegate { refreshTimer.Dispose(); };
+            FormClosed += delegate { refreshTimer.Dispose(); controlToolTip.Dispose(); };
             RefreshState();
         }
 
@@ -645,6 +781,8 @@ namespace Qwerty.KakaoDeliveryControl
             }
 
             briefingSendButton.Enabled = false;
+            briefingDispatching = true;
+            UpdateSavedBriefingDetails();
             briefingStatusLabel.Text = "상태: GitHub에 생성·발송 요청 중";
             briefingStatusLabel.ForeColor = Color.FromArgb(190, 95, 35);
 
@@ -663,7 +801,9 @@ namespace Qwerty.KakaoDeliveryControl
 
                 BeginInvoke((MethodInvoker)delegate
                 {
+                    briefingDispatching = false;
                     briefingSendButton.Enabled = true;
+                    UpdateSavedBriefingDetails();
                     if (failure != null)
                     {
                         briefingStatusLabel.Text = "상태: 요청 실패";
@@ -683,6 +823,75 @@ namespace Qwerty.KakaoDeliveryControl
                     briefingStatusLabel.Text = "상태: 생성·발송 작업 요청 완료";
                     briefingStatusLabel.ForeColor = Color.FromArgb(35, 130, 75);
                     MessageBox.Show(this, "오늘 병무청 브리핑 생성을 시작했습니다. 완료되면 이미지, 본문, 음성요약 링크가 모닝톡방에 도착합니다.", "오늘 브리핑 요청 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                });
+            });
+        }
+
+        private void RefreshSavedBriefings()
+        {
+            if (savedBriefingSending || savedBriefingPicker.DroppedDown) return;
+            string selectedId = savedBriefingPicker.SelectedItem is SavedBriefing ? ((SavedBriefing)savedBriefingPicker.SelectedItem).Id : "";
+            var records = SavedBriefing.Load();
+            savedBriefingPicker.BeginUpdate();
+            savedBriefingPicker.Items.Clear();
+            SavedBriefing latestCompleted = null;
+            foreach (SavedBriefing item in records)
+            {
+                if (item.Status == "completed") { if (latestCompleted == null) latestCompleted = item; continue; }
+                int index = savedBriefingPicker.Items.Add(item);
+                if (item.Id == selectedId) savedBriefingPicker.SelectedIndex = index;
+            }
+            if (savedBriefingPicker.SelectedIndex < 0 && savedBriefingPicker.Items.Count > 0) savedBriefingPicker.SelectedIndex = 0;
+            savedBriefingPicker.EndUpdate();
+            if (savedBriefingPicker.Items.Count == 0)
+            {
+                savedBriefingStatusLabel.Text = latestCompleted == null ? "저장된 미전송 브리핑이 없습니다." : "최근 완료: " + latestCompleted.DateLabel + " " + latestCompleted.Agency;
+                savedBriefingStatusLabel.ForeColor = Color.FromArgb(75, 75, 75);
+            }
+            UpdateSavedBriefingDetails();
+        }
+
+        private void UpdateSavedBriefingDetails()
+        {
+            SavedBriefing item = savedBriefingPicker.SelectedItem as SavedBriefing;
+            savedBriefingPicker.Enabled = !savedBriefingSending;
+            savedBriefingSendButton.Enabled = item != null && item.FilesReady && !savedBriefingSending && !briefingDispatching && !DeliveryState.IsPaused && !RunnerState.IsWorkerRunning;
+            if (savedBriefingSending) return;
+            if (item == null) { savedBriefingDetailLabel.Text = ""; return; }
+            savedBriefingDetailLabel.Text = "남은 항목: " + item.Remaining + "\r\n대상: " + item.Room;
+            savedBriefingStatusLabel.ForeColor = Color.FromArgb(190, 95, 35);
+            savedBriefingStatusLabel.Text = !item.FilesReady ? "저장 파일이 누락되어 전송할 수 없습니다." : DeliveryState.IsPaused ? "전송 꺼짐 · 전송을 켠 뒤 이어 보낼 수 있습니다." : RunnerState.IsWorkerRunning ? "다른 예약 작업이 끝나면 이어 보낼 수 있습니다." : "상태: " + (item.Status == "failed" ? "전송 실패" : item.Status == "paused" ? "전송 중지" : "전송 대기");
+        }
+
+        private void SavedBriefingSendButtonClick(object sender, EventArgs e)
+        {
+            SavedBriefing item = savedBriefingPicker.SelectedItem as SavedBriefing;
+            if (item == null || DeliveryState.IsPaused || savedBriefingSending || RunnerState.IsWorkerRunning) return;
+            savedBriefingSending = true;
+            briefingSendButton.Enabled = false;
+            savedBriefingSendButton.Enabled = false;
+            savedBriefingPicker.Enabled = false;
+            savedBriefingStatusLabel.Text = "상태: 저장된 브리핑 전송 중";
+            savedBriefingStatusLabel.ForeColor = Color.FromArgb(190, 95, 35);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                BriefingDispatchResult result = null;
+                Exception failure = null;
+                try { result = BriefingDispatch.ResumeSaved(item.Id); }
+                catch (Exception ex) { failure = ex; }
+                if (IsDisposed || !IsHandleCreated) return;
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    savedBriefingSending = false;
+                    briefingSendButton.Enabled = true;
+                    RefreshSavedBriefings();
+                    if (failure != null) { ShowError(failure, "저장된 브리핑 전송 오류"); return; }
+                    if (result == null || result.ExitCode != 0)
+                    {
+                        MessageBox.Show(this, "전송이 완료되지 않았습니다. 남은 항목을 다시 이어 보낼 수 있습니다.\r\n" + (result == null ? "" : result.Output), "브리핑 전송 미완료", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    MessageBox.Show(this, item.DateLabel + " " + item.Agency + " 브리핑 전송을 완료했습니다.", "저장된 브리핑 전송 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 });
             });
         }
@@ -775,6 +984,7 @@ namespace Qwerty.KakaoDeliveryControl
                 "자동 시작 예약: " + (taskExists ? "등록됨" : "없음") + "  ·  GitHub 연결: " + (runnerConnected ? "정상" : (runnerRunning ? "연결 중" : "없음"));
             runnerStartButton.Enabled = runnerPaused || !runnerRunning;
             runnerStopButton.Enabled = runnerRunning || !runnerPaused;
+            RefreshSavedBriefings();
         }
 
         private void ShowError(Exception ex, string title)

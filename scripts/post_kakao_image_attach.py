@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
 import pyautogui
 import pyperclip
 from kakao_mcp import controller
-from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
+from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused, kakao_delivery_lock
 from kakao_mma_news.kakao_ui_guard import (
     close_owned_common_dialogs,
     file_icon_point,
@@ -203,15 +203,16 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     args = parse_args()
-    result = attach_image(
-        room=args.room,
-        image_path=Path(args.image).resolve(),
-        screenshot_path=Path(args.screenshot).resolve() if args.screenshot else None,
-        open_wait=args.open_wait,
-        open_attempts=args.open_attempts,
-        open_retry_wait=args.open_retry_wait,
-        send_wait=args.send_wait,
-    )
+    with kakao_delivery_lock():
+        result = attach_image(
+            room=args.room,
+            image_path=Path(args.image).resolve(),
+            screenshot_path=Path(args.screenshot).resolve() if args.screenshot else None,
+            open_wait=args.open_wait,
+            open_attempts=args.open_attempts,
+            open_retry_wait=args.open_retry_wait,
+            send_wait=args.send_wait,
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

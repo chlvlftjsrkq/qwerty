@@ -14,7 +14,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from kakao_mma_news.config import load_config
-from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
+from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused, kakao_delivery_lock
 from kakao_mma_news.kakao import split_message
 from kakao_mma_news.kakao import post_to_kakao
 
@@ -346,7 +346,8 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = parse_args()
-    return asyncio.run(post_summary(args))
+    with kakao_delivery_lock():
+        return asyncio.run(post_summary(args))
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ except ModuleNotFoundError as exc:
 else:
     KAKAO_MCP_IMPORT_ERROR = None
 
-from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused
+from kakao_mma_news.delivery_control import delivery_status, is_kakao_delivery_paused, kakao_delivery_lock
 from kakao_mma_news.kakao import split_message
 
 
@@ -673,7 +673,7 @@ def publish_notice(
     }
 
 
-def main() -> int:
+def run() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -714,6 +714,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+
+def main() -> int:
+    with kakao_delivery_lock():
+        return run()
 
 
 if __name__ == "__main__":

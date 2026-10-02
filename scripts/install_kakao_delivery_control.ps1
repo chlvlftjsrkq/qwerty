@@ -25,7 +25,7 @@ if (!$compiler) {
 }
 
 try {
-    & $compiler /nologo /target:winexe /optimize+ /codepage:65001 /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll "/out:$temporaryPath" $sourcePath
+    & $compiler /nologo /target:winexe /optimize+ /codepage:65001 /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll "/out:$temporaryPath" $sourcePath
     if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $temporaryPath)) {
         throw "Kakao delivery control build failed with exit code $LASTEXITCODE."
     }

@@ -3,12 +3,53 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 PAUSE_FILE_ENV = "KAKAO_DELIVERY_PAUSE_FILE"
+
+
+@contextmanager
+def kakao_delivery_lock():
+    # A briefing owns the lock across its child senders; issue alerts also use it.
+    if os.getenv("QWERTY_KAKAO_LOCK_PARENT") == str(os.getppid()):
+        yield
+        return
+    if os.name != "nt":
+        import fcntl
+        path = pause_file_path().parent / "kakao-ui.lock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.CreateMutexW.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.ReleaseMutex.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateMutexW(None, False, "Local\\qwerty-kakao-delivery")
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    acquired = False
+    try:
+        acquired = kernel.WaitForSingleObject(handle, 15000) in (0, 0x80)
+        if not acquired:
+            raise RuntimeError("다른 카카오톡 전송 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.")
+        yield
+    finally:
+        if acquired:
+            kernel.ReleaseMutex(handle)
+        kernel.CloseHandle(handle)
 
 
 def pause_file_path() -> Path:
